@@ -1,3 +1,23 @@
+# agents
 AGENTS.md
 CLAUDE.md
+
+# built binaries
+/tinyvault
+/dist/
+*.exe
+
+# local data and secrets
+*.db
+*.db-wal
+*.db-shm
+*.key
+.env
+.env.*
+/data/
+
+# tooling
+.idea/
+.vscode/
 .DS_Store
+coverage.out

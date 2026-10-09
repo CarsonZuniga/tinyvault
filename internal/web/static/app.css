@@ -1,0 +1,28 @@
+:root{color-scheme:light dark;--bg:#fff;--fg:#1b1f23;--muted:#6a737d;--line:#d8dee4;--accent:#0b5fff;--danger:#c62828;--card:#f6f8fa}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1318;--fg:#e6edf3;--muted:#8b949e;--line:#30363d;--accent:#58a6ff;--danger:#ff7b72;--card:#161b22}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}
+header{display:flex;justify-content:space-between;align-items:center;max-width:760px;margin:0 auto;padding:16px}
+main{max-width:760px;margin:0 auto;padding:0 16px 48px}
+.brand{font-weight:700;color:var(--fg);text-decoration:none}
+a{color:var(--accent)}
+h1{margin:8px 0 16px}h2{margin:32px 0 8px;font-size:1.1rem}
+.crumbs,.muted{color:var(--muted)}
+.list{list-style:none;padding:0;margin:0 0 16px}
+.list li{padding:10px 12px;border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin:12px 0;display:flex;flex-direction:column;gap:10px}
+label{display:flex;flex-direction:column;gap:4px;font-size:.9rem}
+label.check{flex-direction:row;align-items:center;gap:8px}
+input,textarea,select{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
+textarea{font-family:ui-monospace,monospace;width:100%}
+button{font:inherit;padding:8px 14px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;align-self:flex-start}
+button.link{background:none;color:var(--accent);padding:0}
+button.danger{background:var(--danger)}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+td.actions{display:flex;gap:8px;justify-content:flex-end}
+td.actions form{margin:0}
+.notice,.error{padding:10px 12px;border-radius:6px;margin:8px 0}
+.notice{background:rgba(46,160,67,.15);border:1px solid rgba(46,160,67,.5)}
+.error{background:rgba(198,40,40,.12);border:1px solid var(--danger)}
+.danger-zone{border-color:var(--danger);margin-top:40px}

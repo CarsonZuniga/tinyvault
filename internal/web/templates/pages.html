@@ -1,0 +1,95 @@
+{{define "head"}}<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · tinyvault</title>
+<link rel="stylesheet" href="/static/app.css"></head><body>
+<header><a class="brand" href="/">tinyvault</a>
+{{if .Authed}}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form>{{end}}
+</header><main>
+{{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+{{if .Err}}<p class="error" role="alert">{{.Err}}</p>{{end}}
+{{end}}
+
+{{define "foot"}}</main></body></html>{{end}}
+
+{{define "message"}}{{template "head" .}}<p><a href="/">Back to projects</a></p>{{template "foot" .}}{{end}}
+
+{{define "login"}}{{template "head" .}}
+<h1>Log in</h1>
+<form method="post" action="/login" class="card">
+<label>Password <input type="password" name="password" autocomplete="current-password" autofocus required></label>
+<button>Log in</button>
+</form>
+{{template "foot" .}}{{end}}
+
+{{define "projects"}}{{template "head" .}}
+<h1>Projects</h1>
+{{if .Projects}}<ul class="list">{{range .Projects}}<li><a href="/p/{{.}}">{{.}}</a></li>{{end}}</ul>
+{{else}}<p class="muted">No projects yet.</p>{{end}}
+<form method="post" action="/projects" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>New project <input name="name" placeholder="media-stack" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
+<button>Create</button>
+</form>
+{{template "foot" .}}{{end}}
+
+{{define "project"}}{{template "head" .}}
+<p class="crumbs"><a href="/">Projects</a> / {{.Project}}</p>
+<h1>{{.Project}}</h1>
+{{if .Envs}}<ul class="list">{{range .Envs}}<li><a href="/p/{{$.Project}}/{{.}}">{{.}}</a></li>{{end}}</ul>
+{{else}}<p class="muted">No environments yet.</p>{{end}}
+<form method="post" action="/p/{{.Project}}/envs" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>New environment <input name="name" placeholder="prod" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
+<button>Create</button>
+</form>
+<form method="post" action="/p/{{.Project}}/delete" class="card danger-zone">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Delete project and everything in it <input name="confirm" placeholder="type {{.Project}} to confirm" autocomplete="off"></label>
+<button class="danger">Delete project</button>
+</form>
+{{template "foot" .}}{{end}}
+
+{{define "env"}}{{template "head" .}}
+<p class="crumbs"><a href="/">Projects</a> / <a href="/p/{{.Project}}">{{.Project}}</a> / {{.Env}}</p>
+<h1>{{.Env}}</h1>
+{{with .Revealed}}<div class="card"><strong>{{.Key}}</strong>
+<textarea readonly rows="3">{{.Value}}</textarea>
+<p class="muted">Shown once. Reloading the page hides it again.</p></div>{{end}}
+{{if .Keys}}<table><thead><tr><th>Key</th><th></th></tr></thead><tbody>
+{{range .Keys}}<tr><td><code>{{.}}</code></td><td class="actions">
+<form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}/reveal"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Reveal</button></form>
+<form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
+</td></tr>{{end}}</tbody></table>
+{{else}}<p class="muted">No keys yet.</p>{{end}}
+
+<h2>Add or update a key</h2>
+<form method="post" action="/p/{{.Project}}/{{.Env}}/keys" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Key <input name="key" placeholder="DB_PASSWORD" required></label>
+<label>Value <textarea name="value" rows="3" autocomplete="off"></textarea></label>
+<button>Save</button>
+</form>
+
+<h2>Import</h2>
+<form method="post" action="/p/{{.Project}}/{{.Env}}/import" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Paste a .env file, JSON object, or Kubernetes Secret <textarea name="data" rows="6" autocomplete="off" required></textarea></label>
+<button>Import</button>
+</form>
+
+<h2>Export</h2>
+<form method="get" action="/p/{{.Project}}/{{.Env}}/export" class="card">
+<label>Format <select name="format">
+<option value="dotenv">.env</option><option value="json">JSON</option>
+<option value="shell">Shell exports</option><option value="k8s">Kubernetes Secret</option></select></label>
+<label class="check"><input type="checkbox" name="resolve" value="1"> Expand ${REFERENCES}</label>
+<button>Download</button>
+</form>
+
+<form method="post" action="/p/{{.Project}}/{{.Env}}/delete" class="card danger-zone">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Delete this environment and its keys <input name="confirm" placeholder="type {{.Env}} to confirm" autocomplete="off"></label>
+<button class="danger">Delete environment</button>
+</form>
+{{template "foot" .}}{{end}}
