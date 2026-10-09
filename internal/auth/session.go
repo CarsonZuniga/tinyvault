@@ -77,9 +77,3 @@ func (s *sessions) delete(token string) {
 	delete(s.m, digest(token))
 	s.mu.Unlock()
 }
-
-func (s *sessions) clear() {
-	s.mu.Lock()
-	s.m = map[[32]byte]record{}
-	s.mu.Unlock()
-}

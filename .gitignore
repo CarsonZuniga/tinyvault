@@ -12,6 +12,7 @@ CLAUDE.md
 *.db-wal
 *.db-shm
 *.key
+*.hash
 .env
 .env.*
 /data/

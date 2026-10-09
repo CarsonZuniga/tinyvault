@@ -7,26 +7,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"os"
-	"strings"
 )
 
 type Box struct{ aead cipher.AEAD }
 
-func LoadMasterKey() ([]byte, error) {
-	raw := os.Getenv("TINYVAULT_MASTER_KEY")
-	if raw == "" {
-		if p := os.Getenv("TINYVAULT_MASTER_KEY_FILE"); p != "" {
-			b, err := os.ReadFile(p)
-			if err != nil {
-				return nil, err
-			}
-			raw = strings.TrimSpace(string(b))
-		}
-	}
-	if raw == "" {
-		return nil, errors.New("no master key: set TINYVAULT_MASTER_KEY or TINYVAULT_MASTER_KEY_FILE")
-	}
+func ParseKey(raw string) ([]byte, error) {
 	key, err := base64.StdEncoding.DecodeString(raw)
 	if err != nil || len(key) != 32 {
 		return nil, errors.New("master key must be 32 bytes, base64-encoded")

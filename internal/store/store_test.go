@@ -101,26 +101,58 @@ func TestSwappedCiphertextRejected(t *testing.T) {
 	}
 }
 
-func TestImportGetAllAndAudit(t *testing.T) {
+func TestImportIsAtomic(t *testing.T) {
 	s, _ := newStore(t)
 	if err := s.Import("media", "prod", map[string]string{"A": "1", "B": "2"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	m, err := s.GetAll("media", "prod", "admin")
+	m, err := s.GetAll("media", "prod")
 	if err != nil || m["A"] != "1" || m["B"] != "2" {
 		t.Fatalf("%v %v", m, err)
 	}
-	if err := s.Import("media", "prod", map[string]string{"bad key": "x"}, "admin"); err == nil {
+	before, _ := s.ListAudit(50)
+	if err := s.Import("media", "prod", map[string]string{"C": "3", "bad key": "x"}, "admin"); err == nil {
 		t.Fatal("invalid key must fail the whole batch")
 	}
-	log, _ := s.ListAudit(50)
-	for _, e := range log {
-		if strings.Contains(e.Detail+e.Target, "1") && e.Action == "secret.export" && e.Detail != "2 keys" {
-			t.Fatal("audit leaked something unexpected")
+	if keys, _ := s.Keys("media", "prod"); len(keys) != 2 {
+		t.Fatalf("partial import written: %v", keys)
+	}
+	if after, _ := s.ListAudit(50); len(after) != len(before) {
+		t.Fatal("failed import was audited")
+	}
+}
+
+func TestTargetsAndSSHKey(t *testing.T) {
+	s, p := newStore(t)
+	tg := Target{Name: "nas", User: "deploy", Host: "nas.lan", Path: "/srv/app/.env", Format: "dotenv"}
+	if err := s.CreateTarget("media", "prod", tg, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []Target{
+		{Name: "x", User: "u", Host: "h", Path: "relative", Format: "dotenv"},
+		{Name: "x", User: "u", Host: "h", Path: "/a", Format: "toml"},
+		{Name: "x", User: "", Host: "h", Path: "/a", Format: "dotenv"},
+	} {
+		if err := s.CreateTarget("media", "prod", bad, "admin"); !errors.Is(err, ErrBadName) {
+			t.Errorf("accepted %+v", bad)
 		}
 	}
-	if log[0].Action != "secret.export" {
-		t.Fatalf("latest audit %q", log[0].Action)
+	s.PinHostKey("media", "prod", "nas", "ssh-ed25519 FIRST", "admin")
+	if err := s.PinHostKey("media", "prod", "nas", "ssh-ed25519 SECOND", "admin"); !errors.Is(err, ErrNotFound) {
+		t.Fatal("pin must not overwrite an existing key")
+	}
+	if got, _ := s.GetTarget("media", "prod", "nas"); got.HostKey != "ssh-ed25519 FIRST" {
+		t.Fatalf("host key %q", got.HostKey)
+	}
+	key := s.SSHKey()
+	s.Close()
+	s2, err := Open(p, testKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if !key.Equal(s2.SSHKey()) {
+		t.Fatal("ssh key not persisted")
 	}
 }
 

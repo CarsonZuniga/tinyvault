@@ -1,11 +1,17 @@
 package store
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
+	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"github.com/carsonzuniga/tinyvault/internal/crypto"
 	"github.com/carsonzuniga/tinyvault/internal/formats"
@@ -21,8 +27,9 @@ var (
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 type Store struct {
-	db  *sql.DB
-	box *crypto.Box
+	db     *sql.DB
+	box    *crypto.Box
+	sshKey ed25519.PrivateKey
 }
 
 type Version struct {
@@ -56,12 +63,33 @@ CREATE TABLE IF NOT EXISTS secret_versions (
   value BLOB, deleted INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL, actor TEXT NOT NULL,
   UNIQUE(env_id, key, version));
+CREATE TABLE IF NOT EXISTS targets (
+  id INTEGER PRIMARY KEY,
+  env_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, ssh_user TEXT NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL,
+  format TEXT NOT NULL, resolve INTEGER NOT NULL, post_cmd TEXT NOT NULL,
+  host_key TEXT NOT NULL DEFAULT '', pushed_hash TEXT NOT NULL DEFAULT '',
+  pushed_at INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(env_id, name));
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
 `
 
-func New(db *sql.DB, key []byte) (*Store, error) {
+func Open(path string, key []byte) (*Store, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+	s, err := open(db, key)
+	if err != nil {
+		db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func open(db *sql.DB, key []byte) (*Store, error) {
 	box, err := crypto.New(key)
 	if err != nil {
 		return nil, err
@@ -78,12 +106,12 @@ func New(db *sql.DB, key []byte) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
 	}
+	s := &Store{db: db, box: box}
 	fp := crypto.Fingerprint(key)
-	var have string
-	err = db.QueryRow(`SELECT v FROM meta WHERE k='key_fp'`).Scan(&have)
+	have, err := s.meta("key_fp")
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		if _, err := db.Exec(`INSERT INTO meta(k,v) VALUES('key_fp',?)`, fp); err != nil {
+	case errors.Is(err, ErrNotFound):
+		if err := s.setMeta("key_fp", fp); err != nil {
 			return nil, err
 		}
 	case err != nil:
@@ -91,10 +119,57 @@ func New(db *sql.DB, key []byte) (*Store, error) {
 	case have != fp:
 		return nil, ErrWrongKey
 	}
-	return &Store{db: db, box: box}, nil
+	if s.sshKey, err = s.loadSSHKey(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
+
+func (s *Store) SSHKey() ed25519.PrivateKey { return s.sshKey }
+
+func (s *Store) loadSSHKey() (ed25519.PrivateKey, error) {
+	const aad = "meta/ssh_key"
+	enc, err := s.meta("ssh_key")
+	if errors.Is(err, ErrNotFound) {
+		seed := make([]byte, ed25519.SeedSize)
+		if _, err := rand.Read(seed); err != nil {
+			return nil, err
+		}
+		ct, err := s.box.Seal(seed, aad)
+		if err != nil {
+			return nil, err
+		}
+		return ed25519.NewKeyFromSeed(seed), s.setMeta("ssh_key", base64.StdEncoding.EncodeToString(ct))
+	}
+	if err != nil {
+		return nil, err
+	}
+	ct, err := base64.StdEncoding.DecodeString(enc)
+	if err != nil {
+		return nil, err
+	}
+	seed, err := s.box.Open(ct, aad)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt ssh key: %w", err)
+	}
+	return ed25519.NewKeyFromSeed(seed), nil
+}
+
+func (s *Store) meta(k string) (string, error) {
+	var v string
+	err := s.db.QueryRow(`SELECT v FROM meta WHERE k=?`, k).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return v, err
+}
+
+func (s *Store) setMeta(k, v string) error {
+	_, err := s.db.Exec(`INSERT INTO meta(k,v) VALUES(?,?)`, k, v)
+	return err
+}
 
 func aad(project, env, key string) string { return project + "/" + env + "/" + key }
 
@@ -105,15 +180,43 @@ func validName(n string) error {
 	return nil
 }
 
+type execer interface {
+	Exec(q string, args ...any) (sql.Result, error)
+}
+
+func audit(e execer, actor, action, target, detail string) error {
+	_, err := e.Exec(`INSERT INTO audit(ts,actor,action,target,detail) VALUES(?,?,?,?,?)`,
+		time.Now().Unix(), actor, action, target, detail)
+	return err
+}
+
+func (s *Store) Audit(actor, action, target, detail string) error {
+	return audit(s.db, actor, action, target, detail)
+}
+
+func (s *Store) write(fn func(tx *sql.Tx) error, actor, action, target, detail string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	if err := audit(tx, actor, action, target, detail); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CreateProject(name, actor string) error {
 	if err := validName(name); err != nil {
 		return err
 	}
-	_, err := s.db.Exec(`INSERT INTO projects(name,created_at) VALUES(?,?)`, name, time.Now().Unix())
-	if err != nil {
+	return s.write(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO projects(name,created_at) VALUES(?,?)`, name, time.Now().Unix())
 		return mapExists(err)
-	}
-	return s.Audit(actor, "project.create", name, "")
+	}, actor, "project.create", name, "")
 }
 
 func (s *Store) ListProjects() ([]string, error) {
@@ -121,14 +224,9 @@ func (s *Store) ListProjects() ([]string, error) {
 }
 
 func (s *Store) DeleteProject(name, actor string) error {
-	r, err := s.db.Exec(`DELETE FROM projects WHERE name=?`, name)
-	if err != nil {
-		return err
-	}
-	if n, _ := r.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return s.Audit(actor, "project.delete", name, "")
+	return s.write(func(tx *sql.Tx) error {
+		return mustAffect(tx.Exec(`DELETE FROM projects WHERE name=?`, name))
+	}, actor, "project.delete", name, "")
 }
 
 func (s *Store) CreateEnv(project, env, actor string) error {
@@ -139,11 +237,11 @@ func (s *Store) CreateEnv(project, env, actor string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.Exec(`INSERT INTO environments(project_id,name,created_at) VALUES(?,?,?)`,
-		pid, env, time.Now().Unix()); err != nil {
+	return s.write(func(tx *sql.Tx) error {
+		_, err := tx.Exec(`INSERT INTO environments(project_id,name,created_at) VALUES(?,?,?)`,
+			pid, env, time.Now().Unix())
 		return mapExists(err)
-	}
-	return s.Audit(actor, "env.create", project+"/"+env, "")
+	}, actor, "env.create", project+"/"+env, "")
 }
 
 func (s *Store) ListEnvs(project string) ([]string, error) {
@@ -159,55 +257,39 @@ func (s *Store) DeleteEnv(project, env, actor string) error {
 	if err != nil {
 		return err
 	}
-	r, err := s.db.Exec(`DELETE FROM environments WHERE project_id=? AND name=?`, pid, env)
-	if err != nil {
-		return err
-	}
-	if n, _ := r.RowsAffected(); n == 0 {
-		return ErrNotFound
-	}
-	return s.Audit(actor, "env.delete", project+"/"+env, "")
+	return s.write(func(tx *sql.Tx) error {
+		return mustAffect(tx.Exec(`DELETE FROM environments WHERE project_id=? AND name=?`, pid, env))
+	}, actor, "env.delete", project+"/"+env, "")
 }
 
 func (s *Store) Set(project, env, key, value, actor string) error {
-	tx, err := s.db.Begin()
+	eid, err := s.envID(project, env)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	if err := s.setTx(tx, project, env, key, value, actor); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.Audit(actor, "secret.set", aad(project, env, key), "")
+	return s.write(func(tx *sql.Tx) error {
+		return s.insertVersion(tx, eid, project, env, key, value, actor)
+	}, actor, "secret.set", aad(project, env, key), "")
 }
 
 func (s *Store) Import(project, env string, kv map[string]string, actor string) error {
-	tx, err := s.db.Begin()
+	eid, err := s.envID(project, env)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
-	for k, v := range kv {
-		if err := s.setTx(tx, project, env, k, v, actor); err != nil {
-			return err
+	return s.write(func(tx *sql.Tx) error {
+		for k, v := range kv {
+			if err := s.insertVersion(tx, eid, project, env, k, v, actor); err != nil {
+				return err
+			}
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.Audit(actor, "secret.import", project+"/"+env, fmt.Sprintf("%d keys", len(kv)))
+		return nil
+	}, actor, "secret.import", project+"/"+env, fmt.Sprintf("%d keys", len(kv)))
 }
 
-func (s *Store) setTx(tx *sql.Tx, project, env, key, value, actor string) error {
+func (s *Store) insertVersion(tx *sql.Tx, eid int64, project, env, key, value, actor string) error {
 	if !formats.ValidKey(key) {
 		return fmt.Errorf("%w: key %q", ErrBadName, key)
-	}
-	eid, err := s.envIDTx(tx, project, env)
-	if err != nil {
-		return err
 	}
 	ct, err := s.box.Seal([]byte(value), aad(project, env, key))
 	if err != nil {
@@ -225,10 +307,10 @@ func (s *Store) Get(project, env, key, actor string) (string, error) {
 		return "", err
 	}
 	var ct []byte
-	var deleted int
+	var deleted bool
 	err = s.db.QueryRow(`SELECT value,deleted FROM secret_versions
 	  WHERE env_id=? AND key=? ORDER BY version DESC LIMIT 1`, eid, key).Scan(&ct, &deleted)
-	if errors.Is(err, sql.ErrNoRows) || deleted == 1 {
+	if errors.Is(err, sql.ErrNoRows) || deleted {
 		return "", ErrNotFound
 	}
 	if err != nil {
@@ -254,7 +336,8 @@ func (s *Store) Keys(project, env string) ([]string, error) {
 	  ORDER BY key`, eid)
 }
 
-func (s *Store) GetAll(project, env, actor string) (map[string]string, error) {
+// GetAll does not audit; callers record how the values were used.
+func (s *Store) GetAll(project, env string) (map[string]string, error) {
 	eid, err := s.envID(project, env)
 	if err != nil {
 		return nil, err
@@ -278,11 +361,7 @@ func (s *Store) GetAll(project, env, actor string) (map[string]string, error) {
 		}
 		out[k] = string(pt)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	rows.Close()
-	return out, s.Audit(actor, "secret.export", project+"/"+env, fmt.Sprintf("%d keys", len(out)))
+	return out, rows.Err()
 }
 
 // Delete adds a tombstone version, so history survives and rollback works.
@@ -291,28 +370,21 @@ func (s *Store) Delete(project, env, key, actor string) error {
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
+	return s.write(func(tx *sql.Tx) error {
+		var ver int
+		var deleted bool
+		err := tx.QueryRow(`SELECT version,deleted FROM secret_versions
+		  WHERE env_id=? AND key=? ORDER BY version DESC LIMIT 1`, eid, key).Scan(&ver, &deleted)
+		if errors.Is(err, sql.ErrNoRows) || deleted {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO secret_versions(env_id,key,version,value,deleted,created_at,actor)
+		  VALUES(?,?,?,NULL,1,?,?)`, eid, key, ver+1, time.Now().Unix(), actor)
 		return err
-	}
-	defer tx.Rollback()
-	var ver, deleted int
-	err = tx.QueryRow(`SELECT version,deleted FROM secret_versions
-	  WHERE env_id=? AND key=? ORDER BY version DESC LIMIT 1`, eid, key).Scan(&ver, &deleted)
-	if errors.Is(err, sql.ErrNoRows) || deleted == 1 {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	if _, err := tx.Exec(`INSERT INTO secret_versions(env_id,key,version,value,deleted,created_at,actor)
-	  VALUES(?,?,?,NULL,1,?,?)`, eid, key, ver+1, time.Now().Unix(), actor); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	return s.Audit(actor, "secret.delete", aad(project, env, key), "")
+	}, actor, "secret.delete", aad(project, env, key), "")
 }
 
 func (s *Store) History(project, env, key string) ([]Version, error) {
@@ -330,17 +402,19 @@ func (s *Store) History(project, env, key string) ([]Version, error) {
 	for rows.Next() {
 		var v Version
 		var ts int64
-		var d int
-		if err := rows.Scan(&v.Version, &ts, &v.Actor, &d); err != nil {
+		if err := rows.Scan(&v.Version, &ts, &v.Actor, &v.Deleted); err != nil {
 			return nil, err
 		}
-		v.CreatedAt, v.Deleted = time.Unix(ts, 0), d == 1
+		v.CreatedAt = time.Unix(ts, 0)
 		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	if len(out) == 0 {
 		return nil, ErrNotFound
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func (s *Store) Rollback(project, env, key string, version int, actor string) error {
@@ -348,30 +422,23 @@ func (s *Store) Rollback(project, env, key string, version int, actor string) er
 	if err != nil {
 		return err
 	}
-	var ct []byte
-	var deleted int
-	err = s.db.QueryRow(`SELECT value,deleted FROM secret_versions WHERE env_id=? AND key=? AND version=?`,
-		eid, key, version).Scan(&ct, &deleted)
-	if errors.Is(err, sql.ErrNoRows) || deleted == 1 {
-		return ErrNotFound
-	}
-	if err != nil {
-		return err
-	}
-	pt, err := s.box.Open(ct, aad(project, env, key))
-	if err != nil {
-		return err
-	}
-	if err := s.Set(project, env, key, string(pt), actor); err != nil {
-		return err
-	}
-	return s.Audit(actor, "secret.rollback", aad(project, env, key), fmt.Sprintf("to v%d", version))
-}
-
-func (s *Store) Audit(actor, action, target, detail string) error {
-	_, err := s.db.Exec(`INSERT INTO audit(ts,actor,action,target,detail) VALUES(?,?,?,?,?)`,
-		time.Now().Unix(), actor, action, target, detail)
-	return err
+	return s.write(func(tx *sql.Tx) error {
+		var ct []byte
+		var deleted bool
+		err := tx.QueryRow(`SELECT value,deleted FROM secret_versions WHERE env_id=? AND key=? AND version=?`,
+			eid, key, version).Scan(&ct, &deleted)
+		if errors.Is(err, sql.ErrNoRows) || deleted {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		pt, err := s.box.Open(ct, aad(project, env, key))
+		if err != nil {
+			return err
+		}
+		return s.insertVersion(tx, eid, project, env, key, string(pt), actor)
+	}, actor, "secret.rollback", aad(project, env, key), fmt.Sprintf("to v%d", version))
 }
 
 func (s *Store) ListAudit(limit int) ([]AuditEntry, error) {
@@ -402,19 +469,9 @@ func (s *Store) projectID(name string) (int64, error) {
 	return id, err
 }
 
-func (s *Store) envID(project, env string) (int64, error) { return s.envIDQ(s.db, project, env) }
-
-func (s *Store) envIDTx(tx *sql.Tx, project, env string) (int64, error) {
-	return s.envIDQ(tx, project, env)
-}
-
-type queryer interface {
-	QueryRow(q string, args ...any) *sql.Row
-}
-
-func (s *Store) envIDQ(q queryer, project, env string) (int64, error) {
+func (s *Store) envID(project, env string) (int64, error) {
 	var id int64
-	err := q.QueryRow(`SELECT e.id FROM environments e JOIN projects p ON p.id=e.project_id
+	err := s.db.QueryRow(`SELECT e.id FROM environments e JOIN projects p ON p.id=e.project_id
 	  WHERE p.name=? AND e.name=?`, project, env).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, ErrNotFound
@@ -440,8 +497,18 @@ func (s *Store) names(q string, args ...any) ([]string, error) {
 }
 
 func mapExists(err error) error {
-	if err != nil && regexp.MustCompile(`(?i)unique|constraint`).MatchString(err.Error()) {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed") {
 		return ErrExists
 	}
 	return err
+}
+
+func mustAffect(r sql.Result, err error) error {
+	if err != nil {
+		return err
+	}
+	if n, _ := r.RowsAffected(); n == 0 {
+		return ErrNotFound
+	}
+	return nil
 }

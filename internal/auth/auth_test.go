@@ -191,26 +191,11 @@ func TestLockout(t *testing.T) {
 	}
 }
 
-func TestSecureCookieAndPasswordChange(t *testing.T) {
-	a, h := newAuth(t, Config{SecureCookies: true})
+func TestSecureCookie(t *testing.T) {
+	a, _ := newAuth(t, Config{SecureCookies: true})
 	c, _ := login(t, a, pw)
 	if c.Name != "__Host-tv_session" || !c.Secure {
 		t.Fatalf("secure cookie: %+v", c)
-	}
-	newHash, _ := HashPassword("another long password")
-	a.SetPasswordHash(newHash)
-	if rec := do(h, "GET", c, nil, ""); rec.Code != 303 {
-		t.Fatal("sessions survived password change")
-	}
-	if _, err := login(t, a, pw); err == nil {
-		t.Fatal("old password still works")
-	}
-}
-
-func TestNotConfigured(t *testing.T) {
-	a := New(Config{})
-	if _, err := login(t, a, pw); !errors.Is(err, ErrNotConfigured) {
-		t.Fatalf("got %v", err)
 	}
 }
 

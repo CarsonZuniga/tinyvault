@@ -8,14 +8,16 @@ import (
 	"net"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
-var (
-	ErrInvalidCredentials = errors.New("invalid password")
-	ErrNotConfigured      = errors.New("admin password not configured")
+const (
+	idleTimeout = 30 * time.Minute
+	maxAge      = 12 * time.Hour
+	loginPath   = "/login"
 )
+
+var ErrInvalidCredentials = errors.New("invalid password")
 
 type LockedError struct{ RetryAfter time.Duration }
 
@@ -26,15 +28,10 @@ func (e *LockedError) Error() string {
 type Config struct {
 	PasswordHash  string
 	SecureCookies bool
-	IdleTimeout   time.Duration
-	MaxAge        time.Duration
-	LoginPath     string
 	ClientIP      func(*http.Request) string
 }
 
 type Auth struct {
-	mu     sync.RWMutex
-	hash   string
 	cfg    Config
 	sess   *sessions
 	perIP  *limiter
@@ -44,41 +41,18 @@ type Auth struct {
 type ctxKey struct{}
 
 func New(cfg Config) *Auth {
-	if cfg.IdleTimeout == 0 {
-		cfg.IdleTimeout = 30 * time.Minute
-	}
-	if cfg.MaxAge == 0 {
-		cfg.MaxAge = 12 * time.Hour
-	}
-	if cfg.LoginPath == "" {
-		cfg.LoginPath = "/login"
-	}
 	if cfg.ClientIP == nil {
 		cfg.ClientIP = remoteIP
 	}
 	return &Auth{
-		hash:   cfg.PasswordHash,
 		cfg:    cfg,
-		sess:   newSessions(cfg.IdleTimeout, cfg.MaxAge),
+		sess:   newSessions(idleTimeout, maxAge),
 		perIP:  newLimiter(5, 15*time.Minute, 15*time.Minute),
 		global: newLimiter(50, 15*time.Minute, 5*time.Minute),
 	}
 }
 
-func (a *Auth) SetPasswordHash(hash string) {
-	a.mu.Lock()
-	a.hash = hash
-	a.mu.Unlock()
-	a.sess.clear()
-}
-
 func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password string) error {
-	a.mu.RLock()
-	hash := a.hash
-	a.mu.RUnlock()
-	if hash == "" {
-		return ErrNotConfigured
-	}
 	ip := a.cfg.ClientIP(r)
 	for _, l := range []struct {
 		lim *limiter
@@ -88,7 +62,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password string) er
 			return &LockedError{RetryAfter: wait}
 		}
 	}
-	ok, err := VerifyPassword(password, hash)
+	ok, err := VerifyPassword(password, a.cfg.PasswordHash)
 	if err != nil {
 		return err
 	}
@@ -101,7 +75,7 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password string) er
 	if c, err := r.Cookie(a.cookieName()); err == nil {
 		a.sess.delete(c.Value)
 	}
-	http.SetCookie(w, a.cookie(a.sess.create(), int(a.cfg.MaxAge.Seconds())))
+	http.SetCookie(w, a.cookie(a.sess.create(), int(maxAge.Seconds())))
 	return nil
 }
 
@@ -121,7 +95,7 @@ func (a *Auth) Require(next http.Handler) http.Handler {
 		}
 		if !ok {
 			if r.Method == http.MethodGet || r.Method == http.MethodHead {
-				http.Redirect(w, r, a.cfg.LoginPath, http.StatusSeeOther)
+				http.Redirect(w, r, loginPath, http.StatusSeeOther)
 				return
 			}
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

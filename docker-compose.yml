@@ -1,0 +1,17 @@
+services:
+  tinyvault:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/carsonzuniga/tinyvault:latest
+    restart: unless-stopped
+
+    volumes:
+      - ./data:/data
+
+    ports:
+      - "8080:8080"
+
+    environment:
+      TINYVAULT_MASTER_KEY: ${TINYVAULT_MASTER_KEY}
+      TINYVAULT_ADMIN_HASH: ${TINYVAULT_ADMIN_HASH}

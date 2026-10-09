@@ -87,6 +87,7 @@ func promptPassword(fd int, label string) string {
 }
 
 type config struct {
+	masterKey     []byte
 	adminHash     string
 	dbPath        string
 	listen        string
@@ -110,6 +111,17 @@ func getenv(name, def string) string {
 }
 
 func loadConfig() config {
+	rawKey, err := envOrFile("TINYVAULT_MASTER_KEY")
+	if err != nil {
+		fatal("reading master key: %v", err)
+	}
+	if rawKey == "" {
+		fatal("TINYVAULT_MASTER_KEY or TINYVAULT_MASTER_KEY_FILE must be set (generate one with: tinyvault genkey)")
+	}
+	key, err := crypto.ParseKey(rawKey)
+	if err != nil {
+		fatal("%v (generate one with: tinyvault genkey)", err)
+	}
 	hash, err := envOrFile("TINYVAULT_ADMIN_HASH")
 	if err != nil {
 		fatal("reading admin hash: %v", err)
@@ -125,6 +137,7 @@ func loadConfig() config {
 		fatal("TINYVAULT_SECURE_COOKIES must be true or false")
 	}
 	return config{
+		masterKey:     key,
 		adminHash:     hash,
 		dbPath:        getenv("TINYVAULT_DB", "/data/tinyvault.db"),
 		listen:        getenv("TINYVAULT_LISTEN", ":8080"),
@@ -134,13 +147,9 @@ func loadConfig() config {
 }
 
 func runServe() {
-	key, err := crypto.LoadMasterKey()
-	if err != nil {
-		fatal("%v", err)
-	}
 	cfg := loadConfig()
 
-	st, err := store.Open(cfg.dbPath, key)
+	st, err := store.Open(cfg.dbPath, cfg.masterKey)
 	if errors.Is(err, store.ErrWrongKey) {
 		fatal("master key does not match the database at %s", cfg.dbPath)
 	}

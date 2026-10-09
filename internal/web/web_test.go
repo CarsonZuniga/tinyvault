@@ -248,3 +248,37 @@ func TestLoginLockout(t *testing.T) {
 		t.Fatalf("lockout: %d %v", code, hdr)
 	}
 }
+
+func TestHistoryRollbackAndAudit(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	e.postCSRF("/p/media/prod/keys", url.Values{"key": {"K"}, "value": {"one"}})
+	e.postCSRF("/p/media/prod/keys", url.Values{"key": {"K"}, "value": {"two"}})
+	if code, body, _ := e.get("/p/media/prod/keys/K"); code != 200 || !strings.Contains(body, `name="version" value="1"`) {
+		t.Fatalf("history: %d", code)
+	}
+	if code, _, _ := e.postCSRF("/p/media/prod/keys/K/rollback", url.Values{"version": {"1"}}); code != 200 {
+		t.Fatalf("rollback: %d", code)
+	}
+	if _, body, _ := e.postCSRF("/p/media/prod/keys/K/reveal", url.Values{}); !strings.Contains(body, ">one</textarea>") {
+		t.Fatal("rollback did not restore v1")
+	}
+	if _, body, _ := e.get("/audit"); !strings.Contains(body, "secret.rollback") || strings.Contains(body, ">one<") {
+		t.Fatal("audit page missing entry or leaking values")
+	}
+}
+
+func TestCreateTarget(t *testing.T) {
+	e := newEnv(t)
+	e.seed()
+	form := url.Values{"name": {"nas"}, "user": {"deploy"}, "host": {"nas.lan"}, "path": {"/srv/app/.env"}, "format": {"dotenv"}}
+	code, body, _ := e.postCSRF("/p/media/prod/targets", form)
+	if code != 200 || !strings.Contains(body, "deploy@nas.lan:/srv/app/.env") || !strings.Contains(body, "ssh-ed25519 ") {
+		t.Fatalf("create target: %d", code)
+	}
+	form.Set("name", "other")
+	form.Set("path", "relative.env")
+	if code, _, _ := e.postCSRF("/p/media/prod/targets", form); code != 400 {
+		t.Fatalf("relative path accepted: %d", code)
+	}
+}

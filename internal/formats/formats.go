@@ -92,12 +92,20 @@ func ExportShell(m map[string]string) string {
 	return b.String()
 }
 
-func ExportDockerSecrets(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
+var Formats = map[string]string{"dotenv": "env", "json": "json", "shell": "sh", "k8s": "yaml"}
+
+func Render(format, name string, m map[string]string) (string, error) {
+	switch format {
+	case "dotenv":
+		return ExportDotenv(m), nil
+	case "json":
+		return ExportJSON(m), nil
+	case "shell":
+		return ExportShell(m), nil
+	case "k8s":
+		return ExportK8sSecret(strings.ReplaceAll(name, "_", "-"), "default", m), nil
 	}
-	return out
+	return "", fmt.Errorf("unknown format %q", format)
 }
 
 func ExportK8sSecret(name, namespace string, m map[string]string) string {
@@ -109,7 +117,6 @@ func ExportK8sSecret(name, namespace string, m map[string]string) string {
 	return b.String()
 }
 
-// Minimal line-based parser to stay dependency-free; swap for yaml.v3 later.
 func ParseK8sSecret(s string) (map[string]string, error) {
 	out := map[string]string{}
 	section := ""
