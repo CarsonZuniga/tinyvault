@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/carsonzuniga/tinyvault:latest
+    image: carsonzuniga/tinyvault:latest
     restart: unless-stopped
 
     volumes:
