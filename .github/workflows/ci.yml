@@ -1,0 +1,44 @@
+name: Pull Request CI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          # built-in module + build caching is on by default; no actions/cache needed
+
+      - name: Install tools
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@2026.2.1
+          go install mvdan.cc/gofumpt@v0.12.0
+
+      - name: Run tests
+        run: go test ./...
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run staticcheck
+        run: staticcheck ./...
+
+      - name: Check formatting
+        run: |
+          out=$(gofumpt -l .)
+          if [ -n "$out" ]; then
+            echo "The following files need formatting (run: gofumpt -w .):"
+            echo "$out"
+            exit 1
+          fi
