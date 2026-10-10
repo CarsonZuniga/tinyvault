@@ -1,0 +1,14 @@
+# Ignore version control
+.git
+# Documentation and license
+*.md
+LICENSE
+# Docker build scripts
+Dockerfile
+docker-compose.yml
+# Local data files
+data/
+*.db
+*.db-shm
+*.db-wal
+dev.db
