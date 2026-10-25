@@ -151,7 +151,7 @@
 {{define "audit"}}{{template "head" .}}
 <h1>Audit log</h1>
 {{if .Entries}}<table><thead><tr><th>When</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead><tbody>
-{{range .Entries}}<tr><td>{{.TS.Format "2006-01-02 15:04:05"}}</td><td>{{.Action}}</td><td><code>{{.Target}}</code></td><td class="muted">{{.Detail}}</td></tr>{{end}}
+{{range .Entries}}<tr><td class="nowrap">{{.TS.Format "2006-01-02 15:04:05"}}</td><td class="nowrap">{{.Action}}</td><td><code>{{.Target}}</code></td><td class="muted">{{.Detail}}</td></tr>{{end}}
 </tbody></table>
 {{else}}<p class="muted">Nothing yet.</p>{{end}}
 {{template "foot" .}}{{end}}
