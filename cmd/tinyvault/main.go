@@ -37,10 +37,14 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Add to your authenticator app: "+auth.TOTPURI(secret))
 	case "hash-password":
 		runHashPassword()
+	case "rotate-key":
+		runRotateKey()
 	case "serve":
 		runServe()
 	case "backup":
 		runBackup()
+	case "check":
+		os.Exit(runCheck(os.Args[2:]))
 	default:
 		usage()
 		os.Exit(1)
@@ -54,13 +58,18 @@ Commands:
   genkey          print a new base64 master key
   gentotp         print a new TOTP secret for the admin login
   hash-password   read a password and print its Argon2id hash
+  rotate-key      re-encrypt the database under a new master key and print it
   serve           start the web server
-  backup <file>   write a snapshot of the database to a new file`)
+  backup <file>   write a snapshot of the database to a new file
+  check [project [env]]
+                  check targets; exit 1 if any is not in sync, 2 on errors`)
 }
+
+var fatalCode = 1
 
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "tinyvault: "+format+"\n", args...)
-	os.Exit(1)
+	os.Exit(fatalCode)
 }
 
 func runHashPassword() {
@@ -113,6 +122,8 @@ type config struct {
 	listen        string
 	ipHeader      string
 	secureCookies bool
+	auditDays     int
+	historyKeep   int
 }
 
 func envOrFile(name string) (string, error) {
@@ -130,9 +141,19 @@ func getenv(name, def string) string {
 	return def
 }
 
-func dbPath() string { return getenv("TINYVAULT_DB", "/data/tinyvault.db") }
+func positiveInt(name string) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		fatal("%s must be a positive integer", name)
+	}
+	return n
+}
 
-func loadConfig() config {
+func loadMasterKey() []byte {
 	rawKey, err := envOrFile("TINYVAULT_MASTER_KEY")
 	if err != nil {
 		fatal("reading master key: %v", err)
@@ -144,6 +165,13 @@ func loadConfig() config {
 	if err != nil {
 		fatal("%v (generate one with: tinyvault genkey)", err)
 	}
+	return key
+}
+
+func dbPath() string { return getenv("TINYVAULT_DB", "/data/tinyvault.db") }
+
+func loadConfig() config {
+	key := loadMasterKey()
 	hash, err := envOrFile("TINYVAULT_ADMIN_HASH")
 	if err != nil {
 		fatal("reading admin hash: %v", err)
@@ -176,19 +204,37 @@ func loadConfig() config {
 		listen:        getenv("TINYVAULT_LISTEN", ":8080"),
 		ipHeader:      os.Getenv("TINYVAULT_IP_HEADER"),
 		secureCookies: secure,
+		auditDays:     positiveInt("TINYVAULT_AUDIT_RETENTION_DAYS"),
+		historyKeep:   positiveInt("TINYVAULT_HISTORY_KEEP"),
 	}
+}
+
+func openStore(path string, key []byte) *store.Store {
+	st, err := store.Open(path, key)
+	if errors.Is(err, store.ErrWrongKey) {
+		fatal("master key does not match the database at %s", path)
+	}
+	if err != nil {
+		fatal("opening database: %v", err)
+	}
+	return st
+}
+
+func runRotateKey() {
+	st := openStore(dbPath(), loadMasterKey())
+	defer st.Close()
+	newKey := crypto.GenerateKey()
+	key, _ := crypto.ParseKey(newKey)
+	if err := st.RotateKey(key, "admin"); err != nil {
+		fatal("rotating key: %v", err)
+	}
+	fmt.Println(newKey)
 }
 
 func runServe() {
 	cfg := loadConfig()
 
-	st, err := store.Open(cfg.dbPath, cfg.masterKey)
-	if errors.Is(err, store.ErrWrongKey) {
-		fatal("master key does not match the database at %s", cfg.dbPath)
-	}
-	if err != nil {
-		fatal("opening database: %v", err)
-	}
+	st := openStore(cfg.dbPath, cfg.masterKey)
 	defer st.Close()
 
 	if !cfg.secureCookies {
@@ -223,10 +269,41 @@ func runServe() {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
+	if cfg.auditDays > 0 || cfg.historyKeep > 0 {
+		go runPrune(ctx, st, cfg)
+	}
 
 	log.Printf("listening on %s (db: %s)", cfg.listen, cfg.dbPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		fatal("%v", err)
 	}
 	log.Print("shut down cleanly")
+}
+
+func runPrune(ctx context.Context, st *store.Store, cfg config) {
+	tick := time.NewTicker(24 * time.Hour)
+	defer tick.Stop()
+	for {
+		if cfg.auditDays > 0 {
+			n, err := st.PruneAudit(time.Now().AddDate(0, 0, -cfg.auditDays))
+			if err != nil {
+				log.Printf("pruning audit log: %v", err)
+			} else {
+				log.Printf("pruned %d audit entries older than %d days", n, cfg.auditDays)
+			}
+		}
+		if cfg.historyKeep > 0 {
+			n, err := st.PruneHistory(cfg.historyKeep)
+			if err != nil {
+				log.Printf("pruning history: %v", err)
+			} else {
+				log.Printf("pruned %d versions beyond the latest %d per key", n, cfg.historyKeep)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
