@@ -92,6 +92,34 @@ func ExportShell(m map[string]string) string {
 	return b.String()
 }
 
+func ParseShell(s string) (map[string]string, error) {
+	out := map[string]string{}
+	for rest := strings.TrimSpace(s); rest != ""; rest = strings.TrimSpace(rest) {
+		line, ok := strings.CutPrefix(rest, "export ")
+		k, v, ok2 := strings.Cut(line, "='")
+		if !ok || !ok2 || !ValidKey(k) {
+			return nil, fmt.Errorf("invalid entry")
+		}
+		var b strings.Builder
+		for {
+			i := strings.IndexByte(v, '\'')
+			if i < 0 {
+				return nil, fmt.Errorf("key %s: unterminated value", k)
+			}
+			b.WriteString(v[:i])
+			v = v[i+1:]
+			if !strings.HasPrefix(v, `\''`) {
+				break
+			}
+			b.WriteByte('\'')
+			v = v[3:]
+		}
+		out[k] = b.String()
+		rest = v
+	}
+	return out, nil
+}
+
 var Formats = map[string]string{"dotenv": "env", "json": "json", "shell": "sh", "k8s": "yaml"}
 
 func Render(format, name string, m map[string]string) (string, error) {
@@ -106,6 +134,20 @@ func Render(format, name string, m map[string]string) (string, error) {
 		return ExportK8sSecret(strings.ReplaceAll(name, "_", "-"), "default", m), nil
 	}
 	return "", fmt.Errorf("unknown format %q", format)
+}
+
+func Parse(format, s string) (map[string]string, error) {
+	switch format {
+	case "dotenv":
+		return ParseDotenv(s)
+	case "json":
+		return ParseJSON(s)
+	case "shell":
+		return ParseShell(s)
+	case "k8s":
+		return ParseK8sSecret(s)
+	}
+	return nil, fmt.Errorf("unknown format %q", format)
 }
 
 func ExportK8sSecret(name, namespace string, m map[string]string) string {
@@ -144,9 +186,6 @@ func ParseK8sSecret(s string) (map[string]string, error) {
 			v = string(d)
 		}
 		out[strings.TrimSpace(k)] = v
-	}
-	if len(out) == 0 {
-		return nil, fmt.Errorf("no data found")
 	}
 	return out, nil
 }

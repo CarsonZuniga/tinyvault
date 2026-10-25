@@ -65,6 +65,7 @@ func (s *Server) Handler() http.Handler {
 	prot("POST /p/{project}/{env}/import", s.importKeys)
 	prot("GET /p/{project}/{env}/export", s.export)
 	prot("POST /p/{project}/{env}/targets", s.createTarget)
+	prot("POST /p/{project}/{env}/targets/{target}/preview", s.previewTarget)
 	prot("POST /p/{project}/{env}/targets/{target}/push", s.pushTarget)
 	prot("POST /p/{project}/{env}/targets/{target}/check", s.checkTarget)
 	prot("POST /p/{project}/{env}/targets/{target}/delete", s.deleteTarget)

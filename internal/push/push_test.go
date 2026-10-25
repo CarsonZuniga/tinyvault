@@ -116,6 +116,9 @@ func TestPushCheckAndPinning(t *testing.T) {
 	if !audited(t, st, "target.check", string(Missing)) {
 		t.Fatal("check not audited")
 	}
+	if pv, err := p.Preview("media", "prod", "nas", "admin"); err != nil || !pv.Missing || !audited(t, st, "target.preview", string(Missing)) {
+		t.Fatalf("preview before push: %+v %v", pv, err)
+	}
 	if tg, _ := st.GetTarget("media", "prod", "nas"); tg.Host.HostKey != hostKey {
 		t.Fatalf("host key not pinned on first use: %q", tg.Host.HostKey)
 	}

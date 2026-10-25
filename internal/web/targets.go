@@ -44,6 +44,24 @@ func (s *Server) pushTarget(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, envURL(project, env)+"?n=pushed", http.StatusSeeOther)
 }
 
+type previewPage struct {
+	page
+	Project, Env, Target string
+	Preview              push.Preview
+}
+
+func (s *Server) previewTarget(w http.ResponseWriter, r *http.Request) {
+	project, env, target := r.PathValue("project"), r.PathValue("env"), r.PathValue("target")
+	pv, err := s.pu.Preview(project, env, target, actor)
+	if err != nil {
+		s.pushError(w, r, err)
+		return
+	}
+	s.render(w, http.StatusOK, "preview", previewPage{
+		page: s.pg(r, "Push "+target), Project: project, Env: env, Target: target, Preview: pv,
+	})
+}
+
 func (s *Server) checkTarget(w http.ResponseWriter, r *http.Request) {
 	target := r.PathValue("target")
 	status, err := s.pu.Check(r.PathValue("project"), r.PathValue("env"), target, actor)
