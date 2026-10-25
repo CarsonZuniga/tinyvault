@@ -111,6 +111,14 @@
 </form>
 {{else}}<p class="muted">Add a host on the <a href="/hosts">Hosts page</a> to push this environment.</p>{{end}}
 
+<h2>Clone</h2>
+<form method="post" action="/p/{{.Project}}/{{.Env}}/clone" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<label>Project <select name="project">{{range .Projects}}<option value="{{.}}"{{if eq . $.Project}} selected{{end}}>{{.}}</option>{{end}}</select></label>
+<label>New environment <input name="name" placeholder="staging" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
+<button>Clone</button>
+</form>
+
 <form method="post" action="/p/{{.Project}}/{{.Env}}/delete" class="card danger-zone">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>Delete this environment and its keys <input name="confirm" placeholder="type {{.Env}} to confirm" autocomplete="off"></label>

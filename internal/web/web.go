@@ -56,6 +56,7 @@ func (s *Server) Handler() http.Handler {
 	prot("POST /p/{project}/envs", s.createEnv)
 	prot("GET /p/{project}/{env}", s.env)
 	prot("POST /p/{project}/{env}/delete", s.deleteEnv)
+	prot("POST /p/{project}/{env}/clone", s.cloneEnv)
 	prot("POST /p/{project}/{env}/keys", s.setKey)
 	prot("GET /p/{project}/{env}/keys/{key}", s.history)
 	prot("POST /p/{project}/{env}/keys/{key}/delete", s.deleteKey)
@@ -109,6 +110,7 @@ type envPage struct {
 	Revealed     *revealed
 	Targets      []store.Target
 	Hosts        []store.Host
+	Projects     []string
 	Formats      map[string]string
 }
 
@@ -325,12 +327,17 @@ func (s *Server) envView(w http.ResponseWriter, r *http.Request, status int, v e
 		s.fail(w, r, err)
 		return
 	}
+	projects, err := s.st.ListProjects()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	p := s.pg(r, project+"/"+env)
 	p.Err = v.Err
 	if v.Notice != "" {
 		p.Notice = v.Notice
 	}
-	v.page, v.Project, v.Env, v.Keys, v.Targets, v.Hosts = p, project, env, keys, targets, hosts
+	v.page, v.Project, v.Env, v.Keys, v.Targets, v.Hosts, v.Projects = p, project, env, keys, targets, hosts, projects
 	v.Formats = formats.Formats
 	s.render(w, status, "env", v)
 }
@@ -352,4 +359,13 @@ func (s *Server) deleteEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, projectURL(project), http.StatusSeeOther)
+}
+
+func (s *Server) cloneEnv(w http.ResponseWriter, r *http.Request) {
+	toProject, name := r.PostFormValue("project"), strings.TrimSpace(r.PostFormValue("name"))
+	if err := s.st.CloneEnv(r.PathValue("project"), r.PathValue("env"), toProject, name, actor); err != nil {
+		s.envError(w, r, err)
+		return
+	}
+	http.Redirect(w, r, envURL(toProject, name), http.StatusSeeOther)
 }
