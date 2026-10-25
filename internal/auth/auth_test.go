@@ -102,8 +102,13 @@ func newAuth(t *testing.T, cfg Config) (*Auth, http.Handler) {
 
 func login(t *testing.T, a *Auth, password string) (*http.Cookie, error) {
 	t.Helper()
+	return loginCode(t, a, password, "")
+}
+
+func loginCode(t *testing.T, a *Auth, password, code string) (*http.Cookie, error) {
+	t.Helper()
 	rec := httptest.NewRecorder()
-	err := a.Login(rec, httptest.NewRequest("POST", "/login", nil), password)
+	err := a.Login(rec, httptest.NewRequest("POST", "/login", nil), password, code)
 	if err != nil {
 		return nil, err
 	}
@@ -213,5 +218,47 @@ func TestHeaderIP(t *testing.T) {
 	r.Header.Set("CF-Connecting-IP", "not-an-ip")
 	if got := f(r); got != "10.0.0.5" {
 		t.Fatalf("garbage header: %s", got)
+	}
+}
+
+func TestTOTPCode(t *testing.T) {
+	key := []byte("12345678901234567890")
+	for unix, want := range map[uint64]string{59: "287082", 1111111109: "081804", 1234567890: "005924"} {
+		if got := totpCode(key, unix/30); got != want {
+			t.Errorf("t=%d: got %s, want %s", unix, got, want)
+		}
+	}
+	if k, err := ParseTOTPSecret(GenerateTOTPSecret()); err != nil || len(k) != 20 {
+		t.Fatalf("generated secret: %v", err)
+	}
+}
+
+func TestLoginWithTOTP(t *testing.T) {
+	key := []byte("12345678901234567890")
+	a, _ := newAuth(t, Config{TOTPKey: key})
+	now := time.Unix(1234567890, 0)
+	a.totp.now = func() time.Time { return now }
+	if _, err := login(t, a, pw); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("login without code: %v", err)
+	}
+	if _, err := loginCode(t, a, pw, totpCode(key, 1234567890/30-1)); err != nil {
+		t.Fatalf("previous step rejected: %v", err)
+	}
+	if _, err := loginCode(t, a, pw, totpCode(key, 1234567890/30-1)); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal("code replayed")
+	}
+	if _, err := loginCode(t, a, pw, "005924"); err != nil {
+		t.Fatalf("current code rejected: %v", err)
+	}
+	if _, err := loginCode(t, a, pw, totpCode(key, 1234567890/30+2)); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatal("code outside window accepted")
+	}
+	for i := 0; i < 4; i++ {
+		loginCode(t, a, pw, "000000")
+	}
+	now = now.Add(30 * time.Second)
+	var le *LockedError
+	if _, err := loginCode(t, a, pw, totpCode(key, uint64(now.Unix())/30)); !errors.As(err, &le) {
+		t.Fatalf("wrong codes must count toward lockout, got %v", err)
 	}
 }
