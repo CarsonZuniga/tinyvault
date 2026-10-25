@@ -20,6 +20,8 @@ button.link{background:none;color:var(--accent);padding:0}
 button.danger{background:var(--danger)}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+td{overflow-wrap:anywhere}
+td.nowrap{white-space:nowrap}
 td.actions{display:flex;gap:8px;justify-content:flex-end}
 td.actions form{margin:0}
 .notice,.error{padding:10px 12px;border-radius:6px;margin:8px 0}
