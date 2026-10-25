@@ -29,6 +29,8 @@ To also require a code from an authenticator app at login, run `./tinyvault gent
 
 The master key encrypts everything in the database. Lose it and the data is gone, so back it up somewhere other than next to the db.
 
+To back up the database, run `./tinyvault backup /path/to/backup.db`. It's safe while the server is running, needs only `TINYVAULT_DB`, and won't overwrite an existing file, so put a date in the name when running it from cron. The backup is still encrypted, so it can go anywhere, but keep it apart from the master key.
+
 ### Docker
 
 The provided `docker-compose.yml` runs the server, exposes port 8080 and stores data in `./data`. You must provide the environment variables listed under [Configuration](#configuration).

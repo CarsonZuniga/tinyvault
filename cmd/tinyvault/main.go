@@ -39,6 +39,8 @@ func main() {
 		runHashPassword()
 	case "serve":
 		runServe()
+	case "backup":
+		runBackup()
 	default:
 		usage()
 		os.Exit(1)
@@ -52,7 +54,8 @@ Commands:
   genkey          print a new base64 master key
   gentotp         print a new TOTP secret for the admin login
   hash-password   read a password and print its Argon2id hash
-  serve           start the web server`)
+  serve           start the web server
+  backup <file>   write a snapshot of the database to a new file`)
 }
 
 func fatal(format string, args ...any) {
@@ -92,6 +95,16 @@ func promptPassword(fd int, label string) string {
 	return string(b)
 }
 
+func runBackup() {
+	if len(os.Args) != 3 {
+		usage()
+		os.Exit(1)
+	}
+	if err := store.Backup(dbPath(), os.Args[2], "admin"); err != nil {
+		fatal("backup: %v", err)
+	}
+}
+
 type config struct {
 	masterKey     []byte
 	adminHash     string
@@ -116,6 +129,8 @@ func getenv(name, def string) string {
 	}
 	return def
 }
+
+func dbPath() string { return getenv("TINYVAULT_DB", "/data/tinyvault.db") }
 
 func loadConfig() config {
 	rawKey, err := envOrFile("TINYVAULT_MASTER_KEY")
@@ -157,7 +172,7 @@ func loadConfig() config {
 		masterKey:     key,
 		adminHash:     hash,
 		totpKey:       totpKey,
-		dbPath:        getenv("TINYVAULT_DB", "/data/tinyvault.db"),
+		dbPath:        dbPath(),
 		listen:        getenv("TINYVAULT_LISTEN", ":8080"),
 		ipHeader:      os.Getenv("TINYVAULT_IP_HEADER"),
 		secureCookies: secure,
