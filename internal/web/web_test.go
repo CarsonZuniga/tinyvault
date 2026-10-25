@@ -269,17 +269,29 @@ func TestHistoryRollbackAndAudit(t *testing.T) {
 	}
 }
 
-func TestCreateTarget(t *testing.T) {
+func TestHostsAndTargets(t *testing.T) {
 	e := newEnv(t)
 	e.seed()
-	form := url.Values{"name": {"nas"}, "user": {"deploy"}, "host": {"nas.lan"}, "path": {"/srv/app/.env"}, "format": {"dotenv"}}
-	code, body, _ := e.postCSRF("/p/media/prod/targets", form)
-	if code != 200 || !strings.Contains(body, "deploy@nas.lan:/srv/app/.env") || !strings.Contains(body, "ssh-ed25519 ") {
+	if _, body, _ := e.get("/p/media/prod"); !strings.Contains(body, `href="/hosts">Hosts page`) {
+		t.Fatal("env page must point to hosts page when there are none")
+	}
+	code, body, _ := e.postCSRF("/hosts", url.Values{"name": {"nas"}, "user": {"deploy"}, "address": {"nas.lan"}})
+	if code != 200 || !strings.Contains(body, "deploy@nas.lan") || !strings.Contains(body, "ssh-ed25519 ") {
+		t.Fatalf("create host: %d", code)
+	}
+	form := url.Values{"name": {"app"}, "host": {"nas"}, "path": {"/srv/app/.env"}, "format": {"dotenv"}}
+	if code, body, _ := e.postCSRF("/p/media/prod/targets", form); code != 200 || !strings.Contains(body, "nas:/srv/app/.env") {
 		t.Fatalf("create target: %d", code)
 	}
 	form.Set("name", "other")
+	if code, body, _ := e.postCSRF("/p/media/prod/targets", form); code != 409 || !strings.Contains(body, "in use by media/prod/app") {
+		t.Fatalf("same host and path accepted: %d", code)
+	}
 	form.Set("path", "relative.env")
 	if code, _, _ := e.postCSRF("/p/media/prod/targets", form); code != 400 {
 		t.Fatalf("relative path accepted: %d", code)
+	}
+	if code, body, _ := e.postCSRF("/hosts/nas/delete", url.Values{}); code != 409 || !strings.Contains(body, "media/prod/app") {
+		t.Fatalf("host in use deleted: %d", code)
 	}
 }

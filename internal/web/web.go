@@ -46,6 +46,10 @@ func (s *Server) Handler() http.Handler {
 	prot("POST /logout", s.logout)
 	prot("GET /{$}", s.projects)
 	prot("GET /audit", s.audit)
+	prot("GET /hosts", s.hosts)
+	prot("POST /hosts", s.createHost)
+	prot("POST /hosts/{host}/forget-key", s.forgetHostKey)
+	prot("POST /hosts/{host}/delete", s.deleteHost)
 	prot("POST /projects", s.createProject)
 	prot("GET /p/{project}", s.project)
 	prot("POST /p/{project}/delete", s.deleteProject)
@@ -62,7 +66,6 @@ func (s *Server) Handler() http.Handler {
 	prot("POST /p/{project}/{env}/targets", s.createTarget)
 	prot("POST /p/{project}/{env}/targets/{target}/push", s.pushTarget)
 	prot("POST /p/{project}/{env}/targets/{target}/check", s.checkTarget)
-	prot("POST /p/{project}/{env}/targets/{target}/forget-key", s.forgetHostKey)
 	prot("POST /p/{project}/{env}/targets/{target}/delete", s.deleteTarget)
 	return secure(mux)
 }
@@ -105,8 +108,8 @@ type envPage struct {
 	Keys         []string
 	Revealed     *revealed
 	Targets      []store.Target
+	Hosts        []store.Host
 	Formats      map[string]string
-	PublicKey    string
 }
 
 type historyPage struct {
@@ -123,7 +126,7 @@ type auditPage struct {
 var notices = map[string]string{
 	"saved": "Key saved.", "deleted": "Key deleted.", "restored": "Version restored.",
 	"target": "Target added.", "pushed": "Pushed.", "unpinned": "Host key forgotten. The next connect pins the new key.",
-	"target-deleted": "Target deleted.",
+	"target-deleted": "Target deleted.", "host": "Host added.", "host-deleted": "Host deleted.",
 }
 
 func (s *Server) pg(r *http.Request, title string) page {
@@ -158,6 +161,8 @@ func problem(err error) (int, string) {
 		return http.StatusNotFound, "Not found."
 	case errors.Is(err, store.ErrExists):
 		return http.StatusConflict, "That name already exists."
+	case errors.Is(err, store.ErrInUse):
+		return http.StatusConflict, err.Error()
 	case errors.Is(err, store.ErrBadName), errors.Is(err, store.ErrBadReference):
 		return http.StatusBadRequest, err.Error()
 	}
@@ -307,13 +312,18 @@ func (s *Server) envView(w http.ResponseWriter, r *http.Request, status int, v e
 		s.fail(w, r, err)
 		return
 	}
+	hosts, err := s.st.ListHosts()
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	p := s.pg(r, project+"/"+env)
 	p.Err = v.Err
 	if v.Notice != "" {
 		p.Notice = v.Notice
 	}
-	v.page, v.Project, v.Env, v.Keys, v.Targets = p, project, env, keys, targets
-	v.Formats, v.PublicKey = formats.Formats, s.pu.PublicKey()
+	v.page, v.Project, v.Env, v.Keys, v.Targets, v.Hosts = p, project, env, keys, targets, hosts
+	v.Formats = formats.Formats
 	s.render(w, status, "env", v)
 }
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -122,28 +123,52 @@ func TestImportIsAtomic(t *testing.T) {
 	}
 }
 
-func TestTargetsAndSSHKey(t *testing.T) {
+func TestHostsAndTargets(t *testing.T) {
 	s, p := newStore(t)
-	tg := Target{Name: "nas", User: "deploy", Host: "nas.lan", Path: "/srv/app/.env", Format: "dotenv"}
-	if err := s.CreateTarget("media", "prod", tg, "admin"); err != nil {
+	s.CreateProject("music", "admin")
+	s.CreateEnv("music", "prod", "admin")
+	if err := s.CreateHost(Host{Name: "nas", User: "deploy", Address: "nas.lan"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateHost(Host{Name: "bad", User: "", Address: "x"}, "admin"); !errors.Is(err, ErrBadName) {
+		t.Fatal("host without user accepted")
+	}
+	nas := Host{Name: "nas"}
+	if err := s.CreateTarget("media", "prod", Target{Name: "app", Host: nas, Path: "/srv/media/.env", Format: "dotenv"}, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTarget("music", "prod", Target{Name: "app", Host: nas, Path: "/srv/music/.env", Format: "json"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []Target{
-		{Name: "x", User: "u", Host: "h", Path: "relative", Format: "dotenv"},
-		{Name: "x", User: "u", Host: "h", Path: "/a", Format: "toml"},
-		{Name: "x", User: "", Host: "h", Path: "/a", Format: "dotenv"},
+		{Name: "x", Host: nas, Path: "relative", Format: "dotenv"},
+		{Name: "x", Host: nas, Path: "/a", Format: "toml"},
+		{Name: "x", Host: Host{Name: "nope"}, Path: "/a", Format: "dotenv"},
 	} {
 		if err := s.CreateTarget("media", "prod", bad, "admin"); !errors.Is(err, ErrBadName) {
 			t.Errorf("accepted %+v", bad)
 		}
 	}
-	s.PinHostKey("media", "prod", "nas", "ssh-ed25519 FIRST", "admin")
-	if err := s.PinHostKey("media", "prod", "nas", "ssh-ed25519 SECOND", "admin"); !errors.Is(err, ErrNotFound) {
+	if err := s.CreateTarget("music", "prod", Target{Name: "dup", Host: nas, Path: "/srv/media/.env", Format: "dotenv"}, "admin"); !errors.Is(err, ErrInUse) {
+		t.Fatalf("same host and path accepted: %v", err)
+	}
+
+	s.PinHostKey("media", "prod", "app", "ssh-ed25519 FIRST", "admin")
+	if err := s.PinHostKey("music", "prod", "app", "ssh-ed25519 SECOND", "admin"); !errors.Is(err, ErrNotFound) {
 		t.Fatal("pin must not overwrite an existing key")
 	}
-	if got, _ := s.GetTarget("media", "prod", "nas"); got.HostKey != "ssh-ed25519 FIRST" {
-		t.Fatalf("host key %q", got.HostKey)
+	if got, _ := s.GetTarget("music", "prod", "app"); got.Host.HostKey != "ssh-ed25519 FIRST" || got.Host.Address != "nas.lan" {
+		t.Fatalf("pin not shared through host: %+v", got.Host)
 	}
+	if err := s.DeleteHost("nas", "admin"); !errors.Is(err, ErrInUse) || !strings.Contains(err.Error(), "media/prod/app, music/prod/app") {
+		t.Fatalf("host in use deleted: %v", err)
+	}
+	s.DeleteProject("media", "admin")
+	s.DeleteProject("music", "admin")
+	if err := s.DeleteHost("nas", "admin"); err != nil {
+		t.Fatal(err)
+	}
+
 	key := s.SSHKey()
 	s.Close()
 	s2, err := Open(p, testKey(1))
@@ -153,6 +178,28 @@ func TestTargetsAndSSHKey(t *testing.T) {
 	defer s2.Close()
 	if !key.Equal(s2.SSHKey()) {
 		t.Fatal("ssh key not persisted")
+	}
+}
+
+func TestMigrateReplacesOldTargets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "v.db")
+	db, _ := sql.Open("sqlite", p)
+	if _, err := db.Exec(`CREATE TABLE targets (id INTEGER PRIMARY KEY, ssh_user TEXT, host TEXT, host_key TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(p, testKey(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var v int
+	s.db.QueryRow(`PRAGMA user_version`).Scan(&v)
+	if v != len(migrations) {
+		t.Fatalf("user_version %d", v)
+	}
+	if _, err := s.db.Exec(`SELECT host_id FROM targets`); err != nil {
+		t.Fatalf("targets not recreated: %v", err)
 	}
 }
 
