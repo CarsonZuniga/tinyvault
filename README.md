@@ -1,5 +1,7 @@
 # tinyvault
 
+![Social preview](docs/social-preview.svg)
+
 I got tired of copying `.env` files around my home servers by hand, so I wrote this. It keeps secrets in one place and pushes them out over SSH when I tell it to. Nothing connects to the vault to fetch secrets, so it can sit on the LAN with no inbound access from the boxes it manages.
 
 It's a single Go binary with a SQLite file. There's one admin login and no user accounts.
