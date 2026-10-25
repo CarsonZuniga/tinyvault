@@ -65,12 +65,12 @@ Values stay hidden in the UI until you click Reveal. Every change keeps the old 
 
 ## Pushing
 
-Each environment can have push targets. A target is a file on some host, like `deploy@nas.lan:/srv/media/.env`.
+Each environment can have push targets. A target is a file on a host, like `/srv/media/.env` on `nas`. Hosts are shared, so one box can take targets from any number of projects, each with its own path and format.
 
-1. Copy the vault's SSH public key from the environment page into `~/.ssh/authorized_keys` for that user on the host
-2. Add the target, pick a format, and optionally give it a command to run afterwards, like `docker compose -f /srv/media/compose.yml up -d`
+1. Add the host on the Hosts page and copy the vault's SSH public key into `~/.ssh/authorized_keys` for that user on the host
+2. On the environment page, add a target on that host, pick a format, and optionally give it a command to run afterwards, like `docker compose -f /srv/media/compose.yml up -d`
 3. Hit Push
 
-The file gets replaced in one step with `0600` permissions, so a failed push leaves the old one alone. The host key is saved the first time it connects. If it changes later, pushes stop until you click "Forget host key" on that target. Do that only if you know the host was rebuilt.
+The file gets replaced in one step with `0600` permissions, so a failed push leaves the old one alone. The host key is saved the first time it connects. If it changes later, pushes to that host stop until you click "Forget host key" on the Hosts page. Do that only if you know the host was rebuilt.
 
 Check tells you whether the file on the host still matches the vault, or whether someone edited it there since the last push.

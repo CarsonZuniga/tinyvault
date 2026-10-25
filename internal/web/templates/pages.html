@@ -4,7 +4,7 @@
 <title>{{.Title}} · tinyvault</title>
 <link rel="stylesheet" href="/static/app.css"></head><body>
 <header><a class="brand" href="/">tinyvault</a>
-{{if .Authed}}<nav><a href="/audit">Audit log</a>
+{{if .Authed}}<nav><a href="/hosts">Hosts</a> <a href="/audit">Audit log</a>
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{.CSRF}}"><button class="link">Log out</button></form></nav>{{end}}
 </header><main>
 {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
@@ -90,33 +90,51 @@
 
 <h2>Push targets</h2>
 {{if .Targets}}<table><thead><tr><th>Target</th><th>Destination</th><th>Last push</th><th></th></tr></thead><tbody>
-{{range .Targets}}<tr><td>{{.Name}}</td><td><code>{{.User}}@{{.Host}}:{{.Path}}</code><br><span class="muted">{{.Format}}{{if .Resolve}}, refs expanded{{end}}{{if .PostCmd}}, then <code>{{.PostCmd}}</code>{{end}}</span></td>
+{{range .Targets}}<tr><td>{{.Name}}</td><td><code>{{.Host.Name}}:{{.Path}}</code><br><span class="muted">{{.Format}}{{if .Resolve}}, refs expanded{{end}}{{if .PostCmd}}, then <code>{{.PostCmd}}</code>{{end}}</span></td>
 <td>{{if .PushedAt.IsZero}}<span class="muted">never</span>{{else}}{{.PushedAt.Format "2006-01-02 15:04"}}{{end}}</td>
 <td class="actions">
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/push"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Push</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/check"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Check</button></form>
-{{if .HostKey}}<form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/forget-key"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" title="{{.HostKey}}">Forget host key</button></form>{{end}}
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
 </td></tr>{{end}}</tbody></table>
 {{else}}<p class="muted">No push targets yet.</p>{{end}}
-<form method="post" action="/p/{{.Project}}/{{.Env}}/targets" class="card">
+{{if .Hosts}}<form method="post" action="/p/{{.Project}}/{{.Env}}/targets" class="card">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
-<p class="muted">Add this key to <code>~/.ssh/authorized_keys</code> on the target host:</p>
-<textarea readonly rows="2">{{.PublicKey}}</textarea>
-<label>Name <input name="name" placeholder="nas" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
-<label>SSH user <input name="user" placeholder="deploy" required></label>
-<label>Host <input name="host" placeholder="nas.lan or nas.lan:2222" required></label>
+<label>Name <input name="name" placeholder="media" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
+<label>Host <select name="host">{{range .Hosts}}<option value="{{.Name}}">{{.Name}} ({{.User}}@{{.Address}})</option>{{end}}</select></label>
 <label>File path <input name="path" placeholder="/srv/media/.env" required></label>
 <label>Format <select name="format">{{range $k, $v := .Formats}}<option value="{{$k}}"{{if eq $k "dotenv"}} selected{{end}}>{{$k}}</option>{{end}}</select></label>
 <label class="check"><input type="checkbox" name="resolve" value="1"> Expand ${REFERENCES}</label>
 <label>Command to run after push (optional) <input name="post_cmd" placeholder="docker compose -f /srv/media/compose.yml up -d" autocomplete="off"></label>
 <button>Add target</button>
 </form>
+{{else}}<p class="muted">Add a host on the <a href="/hosts">Hosts page</a> to push this environment.</p>{{end}}
 
 <form method="post" action="/p/{{.Project}}/{{.Env}}/delete" class="card danger-zone">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>Delete this environment and its keys <input name="confirm" placeholder="type {{.Env}} to confirm" autocomplete="off"></label>
 <button class="danger">Delete environment</button>
+</form>
+{{template "foot" .}}{{end}}
+
+{{define "hosts"}}{{template "head" .}}
+<h1>Hosts</h1>
+{{if .Hosts}}<table><thead><tr><th>Host</th><th>Address</th><th>Host key</th><th></th></tr></thead><tbody>
+{{range .Hosts}}<tr><td>{{.Name}}</td><td><code>{{.User}}@{{.Address}}</code></td>
+<td>{{if .HostKey}}<span title="{{.HostKey}}">pinned</span>{{else}}<span class="muted">pinned on first connect</span>{{end}}</td>
+<td class="actions">
+{{if .HostKey}}<form method="post" action="/hosts/{{.Name}}/forget-key"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" title="{{.HostKey}}">Forget host key</button></form>{{end}}
+<form method="post" action="/hosts/{{.Name}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
+</td></tr>{{end}}</tbody></table>
+{{else}}<p class="muted">No hosts yet.</p>{{end}}
+<form method="post" action="/hosts" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<p class="muted">Add this key to <code>~/.ssh/authorized_keys</code> for the SSH user on the host:</p>
+<textarea readonly rows="2">{{.PublicKey}}</textarea>
+<label>Name <input name="name" placeholder="nas" pattern="[a-z0-9][a-z0-9_\-]*" required></label>
+<label>SSH user <input name="user" placeholder="deploy" required></label>
+<label>Address <input name="address" placeholder="nas.lan or nas.lan:2222" required></label>
+<button>Add host</button>
 </form>
 {{template "foot" .}}{{end}}
 

@@ -43,11 +43,11 @@ _Avoid_: Dump, download
 ## Delivery
 
 **Target**:
-A file on a remote machine that one environment is pushed to, with its format, whether references are resolved, and an optional post-command.
+A file on a host that one environment is pushed to, with its format, whether references are resolved, and an optional post-command.
 _Avoid_: Destination, deployment
 
 **Host**:
-A remote machine that targets point at, with its SSH user, address and host key pin. Shared by targets across projects. Planned; today these fields live on each target.
+A remote machine that targets point at, with its SSH user, address and host key pin. Shared by targets across projects.
 _Avoid_: Server, node, remote
 
 **Push**:

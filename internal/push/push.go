@@ -77,8 +77,8 @@ func (p *Pusher) export(project, env, target, actor, detail string) (store.Targe
 }
 
 func (p *Pusher) connect(project, env string, t store.Target, actor string) (*ssh.Client, error) {
-	c, seen, err := dial(p.st.SSHKey(), t)
-	if t.HostKey == "" && seen != "" {
+	c, seen, err := dial(p.st.SSHKey(), t.Host)
+	if t.Host.HostKey == "" && seen != "" {
 		if err := p.st.PinHostKey(project, env, t.Name, seen, actor); err != nil {
 			log.Printf("pin host key for %s: %v", t.Name, err)
 		}

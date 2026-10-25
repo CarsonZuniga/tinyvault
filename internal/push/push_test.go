@@ -78,7 +78,7 @@ func serveConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	}
 }
 
-func newPusher(t *testing.T) (p *Pusher, st *store.Store, addr, hostKey string) {
+func newPusher(t *testing.T) (p *Pusher, st *store.Store, hostKey string) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "v.db"), make([]byte, 32))
 	if err != nil {
@@ -90,7 +90,8 @@ func newPusher(t *testing.T) (p *Pusher, st *store.Store, addr, hostKey string) 
 	st.Set("media", "prod", "A", "1", "admin")
 	pub, _ := ssh.NewPublicKey(st.SSHKey().Public())
 	addr, key := sshServer(t, pub)
-	return New(st), st, addr, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	st.CreateHost(store.Host{Name: "box", User: "u", Address: addr}, "admin")
+	return New(st), st, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 }
 
 func audited(t *testing.T, st *store.Store, action, detail string) bool {
@@ -100,12 +101,12 @@ func audited(t *testing.T, st *store.Store, action, detail string) bool {
 }
 
 func TestPushCheckAndPinning(t *testing.T) {
-	p, st, addr, hostKey := newPusher(t)
+	p, st, hostKey := newPusher(t)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "it's here", "app.env")
 	os.Mkdir(filepath.Dir(path), 0o755)
 	st.CreateTarget("media", "prod", store.Target{
-		Name: "nas", User: "u", Host: addr, Path: path, Format: "dotenv",
+		Name: "nas", Host: store.Host{Name: "box"}, Path: path, Format: "dotenv",
 		PostCmd: "touch " + quote(filepath.Join(dir, "ran")),
 	}, "admin")
 
@@ -115,8 +116,8 @@ func TestPushCheckAndPinning(t *testing.T) {
 	if !audited(t, st, "target.check", string(Missing)) {
 		t.Fatal("check not audited")
 	}
-	if tg, _ := st.GetTarget("media", "prod", "nas"); tg.HostKey != hostKey {
-		t.Fatalf("host key not pinned on first use: %q", tg.HostKey)
+	if tg, _ := st.GetTarget("media", "prod", "nas"); tg.Host.HostKey != hostKey {
+		t.Fatalf("host key not pinned on first use: %q", tg.Host.HostKey)
 	}
 	if err := p.Push("media", "prod", "nas", "admin"); err != nil {
 		t.Fatal(err)
@@ -150,12 +151,14 @@ func TestPushCheckAndPinning(t *testing.T) {
 			t.Fatalf("want %v, got %v %v", step.want, s, err)
 		}
 	}
-	st.CreateTarget("media", "prod", store.Target{Name: "fresh", User: "u", Host: addr, Path: path, Format: "json"}, "admin")
+	fresh := filepath.Join(dir, "fresh.json")
+	os.WriteFile(fresh, []byte("{}"), 0o600)
+	st.CreateTarget("media", "prod", store.Target{Name: "fresh", Host: store.Host{Name: "box"}, Path: fresh, Format: "json"}, "admin")
 	if s, _ := p.Check("media", "prod", "fresh", "admin"); s != Unpushed {
 		t.Fatalf("want never pushed, got %v", s)
 	}
 
-	st.ForgetHostKey("media", "prod", "nas", "admin")
+	st.ForgetHostKey("box", "admin")
 	st.PinHostKey("media", "prod", "nas", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl", "admin")
 	var remote *RemoteError
 	if err := p.Push("media", "prod", "nas", "admin"); !errors.Is(err, ErrHostKeyMismatch) || !errors.As(err, &remote) {
@@ -164,13 +167,13 @@ func TestPushCheckAndPinning(t *testing.T) {
 }
 
 func TestPushFailures(t *testing.T) {
-	p, st, addr, _ := newPusher(t)
+	p, st, _ := newPusher(t)
 	dir := t.TempDir()
 	for _, tg := range []store.Target{
 		{Name: "nodir", Path: filepath.Join(dir, "nope", "x.env")},
 		{Name: "postcmd", Path: filepath.Join(dir, "x.env"), PostCmd: "exit 7"},
 	} {
-		tg.User, tg.Host, tg.Format = "u", addr, "dotenv"
+		tg.Host, tg.Format = store.Host{Name: "box"}, "dotenv"
 		st.CreateTarget("media", "prod", tg, "admin")
 		var remote *RemoteError
 		if err := p.Push("media", "prod", tg.Name, "admin"); !errors.As(err, &remote) {
@@ -183,7 +186,7 @@ func TestPushFailures(t *testing.T) {
 
 	st.Import("media", "prod", map[string]string{"X": "${Y}", "Y": "${X}"}, "admin")
 	st.CreateTarget("media", "prod", store.Target{
-		Name: "cycle", User: "u", Host: addr, Path: filepath.Join(dir, "c.env"),
+		Name: "cycle", Host: store.Host{Name: "box"}, Path: filepath.Join(dir, "c.env"),
 		Format: "dotenv", Resolve: true,
 	}, "admin")
 	if err := p.Push("media", "prod", "cycle", "admin"); !errors.Is(err, store.ErrBadReference) {

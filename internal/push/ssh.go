@@ -23,23 +23,23 @@ func (e *RemoteError) Error() string { return e.Err.Error() }
 func (e *RemoteError) Unwrap() error { return e.Err }
 
 // An empty HostKey trusts the host on first use.
-func dial(key ed25519.PrivateKey, t store.Target) (*ssh.Client, string, error) {
+func dial(key ed25519.PrivateKey, h store.Host) (*ssh.Client, string, error) {
 	signer, err := ssh.NewSignerFromKey(key)
 	if err != nil {
 		return nil, "", err
 	}
-	addr := t.Host
+	addr := h.Address
 	if _, _, err := net.SplitHostPort(addr); err != nil {
 		addr = net.JoinHostPort(addr, "22")
 	}
 	var seen string
 	cfg := &ssh.ClientConfig{
-		User:    t.User,
+		User:    h.User,
 		Auth:    []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		Timeout: 10 * time.Second,
 		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
 			seen = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
-			if t.HostKey != "" && t.HostKey != seen {
+			if h.HostKey != "" && h.HostKey != seen {
 				return ErrHostKeyMismatch
 			}
 			return nil
@@ -47,7 +47,7 @@ func dial(key ed25519.PrivateKey, t store.Target) (*ssh.Client, string, error) {
 	}
 	c, err := ssh.Dial("tcp", addr, cfg)
 	if err != nil {
-		return nil, seen, fmt.Errorf("connect %s@%s: %w", t.User, addr, err)
+		return nil, seen, fmt.Errorf("connect %s@%s: %w", h.User, addr, err)
 	}
 	return c, seen, nil
 }

@@ -22,6 +22,7 @@ var (
 	ErrExists   = errors.New("already exists")
 	ErrBadName  = errors.New("invalid name")
 	ErrWrongKey = errors.New("master key does not match this database")
+	ErrInUse    = errors.New("in use")
 )
 
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
@@ -46,35 +47,6 @@ type AuditEntry struct {
 	Target string
 	Detail string
 }
-
-const schema = `
-CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS projects (
-  id INTEGER PRIMARY KEY, name TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS environments (
-  id INTEGER PRIMARY KEY,
-  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name TEXT NOT NULL, created_at INTEGER NOT NULL,
-  UNIQUE(project_id, name));
-CREATE TABLE IF NOT EXISTS secret_versions (
-  id INTEGER PRIMARY KEY,
-  env_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-  key TEXT NOT NULL, version INTEGER NOT NULL,
-  value BLOB, deleted INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, actor TEXT NOT NULL,
-  UNIQUE(env_id, key, version));
-CREATE TABLE IF NOT EXISTS targets (
-  id INTEGER PRIMARY KEY,
-  env_id INTEGER NOT NULL REFERENCES environments(id) ON DELETE CASCADE,
-  name TEXT NOT NULL, ssh_user TEXT NOT NULL, host TEXT NOT NULL, path TEXT NOT NULL,
-  format TEXT NOT NULL, resolve INTEGER NOT NULL, post_cmd TEXT NOT NULL,
-  host_key TEXT NOT NULL DEFAULT '', pushed_hash TEXT NOT NULL DEFAULT '',
-  pushed_at INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(env_id, name));
-CREATE TABLE IF NOT EXISTS audit (
-  id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, actor TEXT NOT NULL,
-  action TEXT NOT NULL, target TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '');
-`
 
 func Open(path string, key []byte) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
@@ -118,6 +90,9 @@ func open(db *sql.DB, key []byte) (*Store, error) {
 		return nil, err
 	case have != fp:
 		return nil, ErrWrongKey
+	}
+	if err := migrate(db); err != nil {
+		return nil, err
 	}
 	if s.sshKey, err = s.loadSSHKey(); err != nil {
 		return nil, err
