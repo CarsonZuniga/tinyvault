@@ -59,10 +59,10 @@
 <textarea readonly rows="3">{{.Value}}</textarea>
 <p class="muted">Shown once. Reloading the page hides it again.</p></div>{{end}}
 {{if .Keys}}<table><thead><tr><th>Key</th><th></th></tr></thead><tbody>
-{{range .Keys}}<tr><td><a href="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}"><code>{{.}}</code></a></td><td class="actions">
+{{range .Keys}}<tr><td><a href="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}"><code>{{.}}</code></a></td><td><div class="actions">
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}/reveal"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Reveal</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{.}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
-</td></tr>{{end}}</tbody></table>
+</div></td></tr>{{end}}</tbody></table>
 {{else}}<p class="muted">No keys yet.</p>{{end}}
 
 <h2>Add or update a key</h2>
@@ -93,11 +93,11 @@
 {{if .Targets}}<table><thead><tr><th>Target</th><th>Destination</th><th>Last push</th><th></th></tr></thead><tbody>
 {{range .Targets}}<tr><td>{{.Name}}</td><td><code>{{.Host.Name}}:{{.Path}}</code><br><span class="muted">{{.Format}}{{if .Resolve}}, refs expanded{{end}}{{if .PostCmd}}, then <code>{{.PostCmd}}</code>{{end}}</span></td>
 <td>{{if .PushedAt.IsZero}}<span class="muted">never</span>{{else}}{{.PushedAt.Format "2006-01-02 15:04"}}{{end}}</td>
-<td class="actions">
+<td><div class="actions">
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/preview"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Push</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/check"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Check</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
-</td></tr>{{end}}</tbody></table>
+</div></td></tr>{{end}}</tbody></table>
 {{else}}<p class="muted">No push targets yet.</p>{{end}}
 {{if .Hosts}}<form method="post" action="/p/{{.Project}}/{{.Env}}/targets" class="card">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -148,10 +148,10 @@
 {{if .Hosts}}<table><thead><tr><th>Host</th><th>Address</th><th>Host key</th><th></th></tr></thead><tbody>
 {{range .Hosts}}<tr><td>{{.Name}}</td><td><code>{{.User}}@{{.Address}}</code></td>
 <td>{{if .HostKey}}<span title="{{.HostKey}}">pinned</span>{{else}}<span class="muted">pinned on first connect</span>{{end}}</td>
-<td class="actions">
+<td><div class="actions">
 {{if .HostKey}}<form method="post" action="/hosts/{{.Name}}/forget-key"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary" title="{{.HostKey}}">Forget host key</button></form>{{end}}
 <form method="post" action="/hosts/{{.Name}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
-</td></tr>{{end}}</tbody></table>
+</div></td></tr>{{end}}</tbody></table>
 {{else}}<p class="muted">No hosts yet.</p>{{end}}
 <form method="post" action="/hosts" class="card">
 <input type="hidden" name="csrf" value="{{.CSRF}}">
@@ -169,7 +169,7 @@
 <h1><code>{{.Key}}</code></h1>
 <table><thead><tr><th>Version</th><th>When</th><th>By</th><th></th></tr></thead><tbody>
 {{range $i, $v := .Versions}}<tr><td>v{{.Version}}{{if .Deleted}} <span class="muted">(deleted)</span>{{end}}</td><td>{{.CreatedAt.Format "2006-01-02 15:04"}}</td><td>{{.Actor}}</td>
-<td class="actions">{{if and $i (not .Deleted)}}<form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{$.Key}}/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.Version}}"><button>Restore</button></form>{{end}}</td></tr>{{end}}
+<td><div class="actions">{{if and $i (not .Deleted)}}<form method="post" action="/p/{{$.Project}}/{{$.Env}}/keys/{{$.Key}}/rollback"><input type="hidden" name="csrf" value="{{$.CSRF}}"><input type="hidden" name="version" value="{{.Version}}"><button>Restore</button></form>{{end}}</div></td></tr>{{end}}
 </tbody></table>
 {{template "foot" .}}{{end}}
 

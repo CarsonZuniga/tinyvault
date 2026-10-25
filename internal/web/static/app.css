@@ -15,15 +15,16 @@ label{display:flex;flex-direction:column;gap:4px;font-size:.9rem}
 label.check{flex-direction:row;align-items:center;gap:8px}
 input,textarea,select{font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg)}
 textarea{font-family:ui-monospace,monospace;width:100%}
-button{font:inherit;padding:8px 14px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;align-self:flex-start}
+button{font:inherit;padding:8px 14px;border:0;border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;align-self:flex-start;white-space:nowrap}
 button.link{background:none;color:var(--accent);padding:0}
 button.danger{background:var(--danger)}
 table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
-td{overflow-wrap:anywhere}
+th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line);vertical-align:middle}
+td code,td.muted{overflow-wrap:anywhere}
 td.nowrap{white-space:nowrap}
-td.actions{display:flex;gap:8px;justify-content:flex-end}
-td.actions form{margin:0}
+.actions{display:flex;gap:8px;justify-content:flex-end}
+.actions form{margin:0}
+td:has(>.actions){width:1%;white-space:nowrap}
 .notice,.error{padding:10px 12px;border-radius:6px;margin:8px 0}
 .notice{background:rgba(46,160,67,.15);border:1px solid rgba(46,160,67,.5)}
 .error{background:rgba(198,40,40,.12);border:1px solid var(--danger)}
