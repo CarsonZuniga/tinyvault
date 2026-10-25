@@ -81,3 +81,9 @@ Each environment can have push targets. A target is a file on a host, like `/srv
 The file gets replaced in one step with `0600` permissions, so a failed push leaves the old one alone. The host key is saved the first time it connects. If it changes later, pushes to that host stop until you click "Forget host key" on the Hosts page. Do that only if you know the host was rebuilt.
 
 Check tells you whether the file on the host still matches the vault, or whether someone edited it there since the last push.
+
+`tinyvault check [project [env]]` runs the same check from the command line, using the same `TINYVAULT_MASTER_KEY` and `TINYVAULT_DB` as the server. It exits 1 if any target is not in sync and 2 if a check fails, so cron can alert on it:
+
+```sh
+0 * * * * . /etc/tinyvault.env && tinyvault check > /dev/null || curl -d "tinyvault targets need attention" https://ntfy.sh/my-topic
+```
