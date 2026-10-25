@@ -104,8 +104,10 @@ func TestPushCheckAndPinning(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "it's here", "app.env")
 	os.Mkdir(filepath.Dir(path), 0o755)
-	st.CreateTarget("media", "prod", store.Target{Name: "nas", User: "u", Host: addr, Path: path, Format: "dotenv",
-		PostCmd: "touch " + quote(filepath.Join(dir, "ran"))}, "admin")
+	st.CreateTarget("media", "prod", store.Target{
+		Name: "nas", User: "u", Host: addr, Path: path, Format: "dotenv",
+		PostCmd: "touch " + quote(filepath.Join(dir, "ran")),
+	}, "admin")
 
 	if s, err := p.Check("media", "prod", "nas", "admin"); err != nil || s != Missing {
 		t.Fatalf("check before push: %v %v", s, err)
@@ -180,8 +182,10 @@ func TestPushFailures(t *testing.T) {
 	}
 
 	st.Import("media", "prod", map[string]string{"X": "${Y}", "Y": "${X}"}, "admin")
-	st.CreateTarget("media", "prod", store.Target{Name: "cycle", User: "u", Host: addr, Path: filepath.Join(dir, "c.env"),
-		Format: "dotenv", Resolve: true}, "admin")
+	st.CreateTarget("media", "prod", store.Target{
+		Name: "cycle", User: "u", Host: addr, Path: filepath.Join(dir, "c.env"),
+		Format: "dotenv", Resolve: true,
+	}, "admin")
 	if err := p.Push("media", "prod", "cycle", "admin"); !errors.Is(err, store.ErrBadReference) {
 		t.Fatalf("want bad reference, got %v", err)
 	}
