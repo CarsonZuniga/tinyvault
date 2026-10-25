@@ -27,11 +27,12 @@ var assets embed.FS
 type Server struct {
 	st  *store.Store
 	au  *auth.Auth
+	pu  *push.Pusher
 	tpl *template.Template
 }
 
-func New(st *store.Store, au *auth.Auth) *Server {
-	return &Server{st: st, au: au, tpl: template.Must(template.ParseFS(assets, "templates/*.html"))}
+func New(st *store.Store, au *auth.Auth, pu *push.Pusher) *Server {
+	return &Server{st: st, au: au, pu: pu, tpl: template.Must(template.ParseFS(assets, "templates/*.html"))}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -157,7 +158,7 @@ func problem(err error) (int, string) {
 		return http.StatusNotFound, "Not found."
 	case errors.Is(err, store.ErrExists):
 		return http.StatusConflict, "That name already exists."
-	case errors.Is(err, store.ErrBadName):
+	case errors.Is(err, store.ErrBadName), errors.Is(err, store.ErrBadReference):
 		return http.StatusBadRequest, err.Error()
 	}
 	log.Printf("internal error: %v", err)
@@ -312,7 +313,7 @@ func (s *Server) envView(w http.ResponseWriter, r *http.Request, status int, v e
 		p.Notice = v.Notice
 	}
 	v.page, v.Project, v.Env, v.Keys, v.Targets = p, project, env, keys, targets
-	v.Formats, v.PublicKey = formats.Formats, push.PublicKey(s.st.SSHKey())
+	v.Formats, v.PublicKey = formats.Formats, s.pu.PublicKey()
 	s.render(w, status, "env", v)
 }
 

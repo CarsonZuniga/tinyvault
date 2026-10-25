@@ -106,7 +106,7 @@ func TestImportIsAtomic(t *testing.T) {
 	if err := s.Import("media", "prod", map[string]string{"A": "1", "B": "2"}, "admin"); err != nil {
 		t.Fatal(err)
 	}
-	m, err := s.GetAll("media", "prod")
+	m, err := s.getAll("media", "prod")
 	if err != nil || m["A"] != "1" || m["B"] != "2" {
 		t.Fatalf("%v %v", m, err)
 	}
