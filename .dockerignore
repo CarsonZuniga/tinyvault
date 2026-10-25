@@ -1,14 +1,6 @@
-# Ignore version control
-.git
-# Documentation and license
-*.md
-LICENSE
-# Docker build scripts
-Dockerfile
-docker-compose.yml
-# Local data files
-data/
-*.db
-*.db-shm
-*.db-wal
-dev.db
+# Only the build inputs; keeps keys, hashes and databases out of the context
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
