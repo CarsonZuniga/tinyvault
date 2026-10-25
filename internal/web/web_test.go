@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/carsonzuniga/tinyvault/internal/auth"
+	"github.com/carsonzuniga/tinyvault/internal/push"
 	"github.com/carsonzuniga/tinyvault/internal/store"
 )
 
@@ -37,7 +38,7 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ts := httptest.NewServer(New(st, auth.New(auth.Config{PasswordHash: hash})).Handler())
+	ts := httptest.NewServer(New(st, auth.New(auth.Config{PasswordHash: hash}), push.New(st)).Handler())
 	t.Cleanup(ts.Close)
 	jar, _ := cookiejar.New(nil)
 	return &env{t: t, ts: ts, c: &http.Client{Jar: jar}}

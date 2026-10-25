@@ -1,25 +1,15 @@
 package push
 
 import (
-	"bytes"
-	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
-	"fmt"
-	"net"
+	"log"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/carsonzuniga/tinyvault/internal/store"
 )
-
-var ErrHostKeyMismatch = errors.New("host key does not match the pinned key")
-
-// An empty HostKey trusts the host on first use.
-type Dest struct {
-	User, Host, HostKey string
-}
 
 type Status string
 
@@ -31,112 +21,89 @@ const (
 	Unpushed Status = "never pushed"
 )
 
-func Hash(b []byte) string {
-	h := sha256.Sum256(b)
-	return hex.EncodeToString(h[:])
-}
+type Pusher struct{ st *store.Store }
 
-func PublicKey(key ed25519.PrivateKey) string {
-	pub, _ := ssh.NewPublicKey(key.Public())
+func New(st *store.Store) *Pusher { return &Pusher{st: st} }
+
+func (p *Pusher) PublicKey() string {
+	pub, _ := ssh.NewPublicKey(p.st.SSHKey().Public())
 	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(pub))) + " tinyvault"
 }
 
-func Write(key ed25519.PrivateKey, d Dest, path string, content []byte, postCmd string) (string, error) {
-	c, hostKey, err := dial(key, d)
+func (p *Pusher) Push(project, env, target, actor string) error {
+	t, body, err := p.export(project, env, target, actor, "push "+target)
 	if err != nil {
-		return hostKey, err
+		return err
+	}
+	c, err := p.connect(project, env, t, actor)
+	if err != nil {
+		return err
 	}
 	defer c.Close()
-	script := `set -e; umask 077; t=$(mktemp ` + quote(path+".XXXXXX") + `); trap 'rm -f "$t"' EXIT; cat > "$t"; mv -f "$t" ` + quote(path)
-	if _, err := run(c, script, content); err != nil {
-		return hostKey, fmt.Errorf("write %s: %w", path, err)
+	if err := writeFile(c, t.Path, body, t.PostCmd); err != nil {
+		return &RemoteError{err}
 	}
-	if postCmd != "" {
-		if _, err := run(c, postCmd, nil); err != nil {
-			return hostKey, fmt.Errorf("file written, but post-command failed: %w", err)
-		}
-	}
-	return hostKey, nil
+	return p.st.RecordPush(project, env, t.Name, hash(body), actor)
 }
 
-func Check(key ed25519.PrivateKey, d Dest, path string, want []byte, pushedHash string) (Status, string, error) {
-	c, hostKey, err := dial(key, d)
+func (p *Pusher) Check(project, env, target, actor string) (Status, error) {
+	t, body, err := p.export(project, env, target, actor, "check "+target)
 	if err != nil {
-		return "", hostKey, err
+		return "", err
+	}
+	c, err := p.connect(project, env, t, actor)
+	if err != nil {
+		return "", err
 	}
 	defer c.Close()
-	out, err := run(c, "if [ -f "+quote(path)+" ]; then cat "+quote(path)+"; else exit 3; fi", nil)
-	var exit *ssh.ExitError
-	switch {
-	case errors.As(err, &exit) && exit.ExitStatus() == 3:
-		return Missing, hostKey, nil
-	case err != nil:
-		return "", hostKey, fmt.Errorf("read %s: %w", path, err)
+	remote, found, err := readFile(c, t.Path)
+	if err != nil {
+		return "", &RemoteError{err}
 	}
-	remote := Hash(out)
-	switch {
-	case remote == Hash(want):
-		return InSync, hostKey, nil
+	status := compare(remote, found, body, t.PushedHash)
+	if err := p.st.Audit(actor, "target.check", project+"/"+env+"/"+t.Name, string(status)); err != nil {
+		return "", err
+	}
+	return status, nil
+}
+
+func (p *Pusher) export(project, env, target, actor, detail string) (store.Target, []byte, error) {
+	t, err := p.st.GetTarget(project, env, target)
+	if err != nil {
+		return t, nil, err
+	}
+	body, err := p.st.Export(project, env, t.Format, t.Resolve, actor, detail)
+	return t, []byte(body), err
+}
+
+func (p *Pusher) connect(project, env string, t store.Target, actor string) (*ssh.Client, error) {
+	c, seen, err := dial(p.st.SSHKey(), t)
+	if t.HostKey == "" && seen != "" {
+		if err := p.st.PinHostKey(project, env, t.Name, seen, actor); err != nil {
+			log.Printf("pin host key for %s: %v", t.Name, err)
+		}
+	}
+	if err != nil {
+		return nil, &RemoteError{err}
+	}
+	return c, nil
+}
+
+func compare(remote []byte, found bool, want []byte, pushedHash string) Status {
+	switch h := hash(remote); {
+	case !found:
+		return Missing
+	case h == hash(want):
+		return InSync
 	case pushedHash == "":
-		return Unpushed, hostKey, nil
-	case remote == pushedHash:
-		return Pending, hostKey, nil
+		return Unpushed
+	case h == pushedHash:
+		return Pending
 	}
-	return Drifted, hostKey, nil
+	return Drifted
 }
 
-func dial(key ed25519.PrivateKey, d Dest) (*ssh.Client, string, error) {
-	signer, err := ssh.NewSignerFromKey(key)
-	if err != nil {
-		return nil, "", err
-	}
-	addr := d.Host
-	if _, _, err := net.SplitHostPort(addr); err != nil {
-		addr = net.JoinHostPort(addr, "22")
-	}
-	var seen string
-	cfg := &ssh.ClientConfig{
-		User:    d.User,
-		Auth:    []ssh.AuthMethod{ssh.PublicKeys(signer)},
-		Timeout: 10 * time.Second,
-		HostKeyCallback: func(_ string, _ net.Addr, key ssh.PublicKey) error {
-			seen = strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
-			if d.HostKey != "" && d.HostKey != seen {
-				return ErrHostKeyMismatch
-			}
-			return nil
-		},
-	}
-	c, err := ssh.Dial("tcp", addr, cfg)
-	if err != nil {
-		return nil, seen, fmt.Errorf("connect %s@%s: %w", d.User, addr, err)
-	}
-	return c, seen, nil
-}
-
-func run(c *ssh.Client, cmd string, stdin []byte) ([]byte, error) {
-	sess, err := c.NewSession()
-	if err != nil {
-		return nil, err
-	}
-	defer sess.Close()
-	var stdout, stderr bytes.Buffer
-	sess.Stdin = bytes.NewReader(stdin)
-	sess.Stdout, sess.Stderr = &stdout, &stderr
-	if err := sess.Run(cmd); err != nil {
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("%w: %s", err, truncate(msg, 300))
-		}
-		return nil, err
-	}
-	return stdout.Bytes(), nil
-}
-
-func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
+func hash(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])
 }

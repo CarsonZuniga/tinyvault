@@ -13,6 +13,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/carsonzuniga/tinyvault/internal/store"
 )
 
 func sshServer(t *testing.T, clientKey ssh.PublicKey) (addr string, hostKey ssh.PublicKey) {
@@ -76,27 +78,52 @@ func serveConn(nc net.Conn, cfg *ssh.ServerConfig) {
 	}
 }
 
-func TestWriteCheckAndPinning(t *testing.T) {
-	_, key, _ := ed25519.GenerateKey(rand.Reader)
-	signer, _ := ssh.NewSignerFromKey(key)
-	addr, hostKey := sshServer(t, signer.PublicKey())
-	dir := t.TempDir()
-	path := filepath.Join(dir, "it's here", "app.env")
-	os.Mkdir(filepath.Dir(path), 0o755)
-	d := Dest{User: "u", Host: addr}
-
-	if st, _, err := Check(key, d, path, []byte("A=1\n"), ""); err != nil || st != Missing {
-		t.Fatalf("check before push: %v %v", st, err)
-	}
-	seen, err := Write(key, d, path, []byte("A=1\n"), "touch "+quote(filepath.Join(dir, "ran")))
+func newPusher(t *testing.T) (p *Pusher, st *store.Store, addr, hostKey string) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(t.TempDir(), "v.db"), make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seen != strings.TrimSpace(string(ssh.MarshalAuthorizedKey(hostKey))) {
-		t.Fatalf("host key not reported: %q", seen)
+	t.Cleanup(func() { st.Close() })
+	st.CreateProject("media", "admin")
+	st.CreateEnv("media", "prod", "admin")
+	st.Set("media", "prod", "A", "1", "admin")
+	pub, _ := ssh.NewPublicKey(st.SSHKey().Public())
+	addr, key := sshServer(t, pub)
+	return New(st), st, addr, strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+}
+
+func audited(t *testing.T, st *store.Store, action, detail string) bool {
+	t.Helper()
+	entries, _ := st.ListAudit(1)
+	return len(entries) == 1 && entries[0].Action == action && entries[0].Detail == detail
+}
+
+func TestPushCheckAndPinning(t *testing.T) {
+	p, st, addr, hostKey := newPusher(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "it's here", "app.env")
+	os.Mkdir(filepath.Dir(path), 0o755)
+	st.CreateTarget("media", "prod", store.Target{Name: "nas", User: "u", Host: addr, Path: path, Format: "dotenv",
+		PostCmd: "touch " + quote(filepath.Join(dir, "ran"))}, "admin")
+
+	if s, err := p.Check("media", "prod", "nas", "admin"); err != nil || s != Missing {
+		t.Fatalf("check before push: %v %v", s, err)
 	}
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("written file: %v %v", fi, err)
+	if !audited(t, st, "target.check", string(Missing)) {
+		t.Fatal("check not audited")
+	}
+	if tg, _ := st.GetTarget("media", "prod", "nas"); tg.HostKey != hostKey {
+		t.Fatalf("host key not pinned on first use: %q", tg.HostKey)
+	}
+	if err := p.Push("media", "prod", "nas", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "A=1\n" {
+		t.Fatalf("written: %q", b)
+	}
+	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("mode %v", fi.Mode())
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ran")); err != nil {
 		t.Fatal("post-command did not run")
@@ -104,29 +131,61 @@ func TestWriteCheckAndPinning(t *testing.T) {
 	if left, _ := filepath.Glob(path + ".*"); len(left) != 0 {
 		t.Fatalf("temp files left behind: %v", left)
 	}
-
-	d.HostKey = seen
-	pushed := Hash([]byte("A=1\n"))
-	if st, _, _ := Check(key, d, path, []byte("A=1\n"), pushed); st != InSync {
-		t.Fatalf("want in sync, got %v", st)
-	}
-	if st, _, _ := Check(key, d, path, []byte("A=2\n"), pushed); st != Pending {
-		t.Fatalf("want pending, got %v", st)
-	}
-	os.WriteFile(path, []byte("A=hacked\n"), 0o600)
-	if st, _, _ := Check(key, d, path, []byte("A=1\n"), pushed); st != Drifted {
-		t.Fatalf("want drifted, got %v", st)
+	if !audited(t, st, "target.push", "") {
+		t.Fatal("push not recorded")
 	}
 
-	if _, err := Write(key, d, filepath.Join(dir, "nope", "x.env"), nil, ""); err == nil {
-		t.Fatal("write into missing dir must fail")
+	for _, step := range []struct {
+		change func()
+		want   Status
+	}{
+		{func() {}, InSync},
+		{func() { st.Set("media", "prod", "A", "2", "admin") }, Pending},
+		{func() { os.WriteFile(path, []byte("A=hacked\n"), 0o600) }, Drifted},
+	} {
+		step.change()
+		if s, err := p.Check("media", "prod", "nas", "admin"); err != nil || s != step.want {
+			t.Fatalf("want %v, got %v %v", step.want, s, err)
+		}
 	}
-	if _, err := Write(key, d, path, nil, "exit 7"); err == nil {
-		t.Fatal("failing post-command must be reported")
+	st.CreateTarget("media", "prod", store.Target{Name: "fresh", User: "u", Host: addr, Path: path, Format: "json"}, "admin")
+	if s, _ := p.Check("media", "prod", "fresh", "admin"); s != Unpushed {
+		t.Fatalf("want never pushed, got %v", s)
 	}
 
-	d.HostKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl"
-	if _, err := Write(key, d, path, []byte("x"), ""); !errors.Is(err, ErrHostKeyMismatch) {
+	st.ForgetHostKey("media", "prod", "nas", "admin")
+	st.PinHostKey("media", "prod", "nas", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl", "admin")
+	var remote *RemoteError
+	if err := p.Push("media", "prod", "nas", "admin"); !errors.Is(err, ErrHostKeyMismatch) || !errors.As(err, &remote) {
 		t.Fatalf("want host key mismatch, got %v", err)
+	}
+}
+
+func TestPushFailures(t *testing.T) {
+	p, st, addr, _ := newPusher(t)
+	dir := t.TempDir()
+	for _, tg := range []store.Target{
+		{Name: "nodir", Path: filepath.Join(dir, "nope", "x.env")},
+		{Name: "postcmd", Path: filepath.Join(dir, "x.env"), PostCmd: "exit 7"},
+	} {
+		tg.User, tg.Host, tg.Format = "u", addr, "dotenv"
+		st.CreateTarget("media", "prod", tg, "admin")
+		var remote *RemoteError
+		if err := p.Push("media", "prod", tg.Name, "admin"); !errors.As(err, &remote) {
+			t.Fatalf("%s: want remote error, got %v", tg.Name, err)
+		}
+		if got, _ := st.GetTarget("media", "prod", tg.Name); got.PushedHash != "" {
+			t.Fatalf("%s: failed push recorded", tg.Name)
+		}
+	}
+
+	st.Import("media", "prod", map[string]string{"X": "${Y}", "Y": "${X}"}, "admin")
+	st.CreateTarget("media", "prod", store.Target{Name: "cycle", User: "u", Host: addr, Path: filepath.Join(dir, "c.env"),
+		Format: "dotenv", Resolve: true}, "admin")
+	if err := p.Push("media", "prod", "cycle", "admin"); !errors.Is(err, store.ErrBadReference) {
+		t.Fatalf("want bad reference, got %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "c.env")); err == nil {
+		t.Fatal("unresolvable env was pushed")
 	}
 }

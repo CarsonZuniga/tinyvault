@@ -100,21 +100,6 @@ func (s *Server) importKeys(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("%s?n=imported&c=%d", envURL(project, env), len(kv)), http.StatusSeeOther)
 }
 
-func (s *Server) renderEnv(project, env, format string, resolve bool) (string, error) {
-	m, err := s.st.GetAll(project, env)
-	if err != nil {
-		return "", err
-	}
-	if resolve {
-		if m, err = formats.Resolve(m); err != nil {
-			return "", fmt.Errorf("%w: cannot resolve references: %v", errBadInput, err)
-		}
-	}
-	return formats.Render(format, project+"-"+env, m)
-}
-
-var errBadInput = errors.New("bad input")
-
 func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	project, env := r.PathValue("project"), r.PathValue("env")
 	format := r.URL.Query().Get("format")
@@ -122,17 +107,9 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		format, ext = "dotenv", formats.Formats["dotenv"]
 	}
-	body, err := s.renderEnv(project, env, format, r.URL.Query().Get("resolve") == "1")
-	if errors.Is(err, errBadInput) {
-		s.envView(w, r, http.StatusBadRequest, envPage{page: page{Err: err.Error()}})
-		return
-	}
+	body, err := s.st.Export(project, env, format, r.URL.Query().Get("resolve") == "1", actor, format)
 	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	if err := s.st.Audit(actor, "secret.export", project+"/"+env, format); err != nil {
-		s.fail(w, r, err)
+		s.envError(w, r, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")

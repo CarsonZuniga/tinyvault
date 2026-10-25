@@ -336,8 +336,7 @@ func (s *Store) Keys(project, env string) ([]string, error) {
 	  ORDER BY key`, eid)
 }
 
-// GetAll does not audit; callers record how the values were used.
-func (s *Store) GetAll(project, env string) (map[string]string, error) {
+func (s *Store) getAll(project, env string) (map[string]string, error) {
 	eid, err := s.envID(project, env)
 	if err != nil {
 		return nil, err

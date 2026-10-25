@@ -18,6 +18,7 @@ import (
 
 	"github.com/carsonzuniga/tinyvault/internal/auth"
 	"github.com/carsonzuniga/tinyvault/internal/crypto"
+	"github.com/carsonzuniga/tinyvault/internal/push"
 	"github.com/carsonzuniga/tinyvault/internal/store"
 	"github.com/carsonzuniga/tinyvault/internal/web"
 )
@@ -168,7 +169,7 @@ func runServe() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/", web.New(st, auth.New(authCfg)).Handler())
+	mux.Handle("/", web.New(st, auth.New(authCfg), push.New(st)).Handler())
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))
 	})
