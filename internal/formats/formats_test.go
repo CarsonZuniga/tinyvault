@@ -34,12 +34,23 @@ func TestK8sRoundTrip(t *testing.T) {
 	if err != nil || out["TOKEN"] != "abc123" || out["PASS"] != "p@ss" {
 		t.Fatalf("%v %v", out, err)
 	}
+	if out, err := ParseK8sSecret(ExportK8sSecret("s", "default", nil)); err != nil || len(out) != 0 {
+		t.Fatalf("empty: %v %v", out, err)
+	}
 }
 
 func TestShellEscapesQuotes(t *testing.T) {
 	s := ExportShell(map[string]string{"X": "it's $(rm -rf /)"})
 	if !strings.Contains(s, `'it'\''s $(rm -rf /)'`) {
 		t.Fatal(s)
+	}
+}
+
+func TestShellRoundTrip(t *testing.T) {
+	in := map[string]string{"A": "it's", "B": "multi\nline", "C": ""}
+	out, err := ParseShell(ExportShell(in))
+	if err != nil || len(out) != len(in) || out["A"] != in["A"] || out["B"] != in["B"] {
+		t.Fatalf("%q %v", out, err)
 	}
 }
 

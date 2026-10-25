@@ -76,7 +76,7 @@ Each environment can have push targets. A target is a file on a host, like `/srv
 
 1. Add the host on the Hosts page and copy the vault's SSH public key into `~/.ssh/authorized_keys` for that user on the host
 2. On the environment page, add a target on that host, pick a format, and optionally give it a command to run afterwards, like `docker compose -f /srv/media/compose.yml up -d`
-3. Hit Push
+3. Hit Push, review which keys get added, changed or removed on the host, and confirm
 
 The file gets replaced in one step with `0600` permissions, so a failed push leaves the old one alone. The host key is saved the first time it connects. If it changes later, pushes to that host stop until you click "Forget host key" on the Hosts page. Do that only if you know the host was rebuilt.
 

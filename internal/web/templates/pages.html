@@ -94,7 +94,7 @@
 {{range .Targets}}<tr><td>{{.Name}}</td><td><code>{{.Host.Name}}:{{.Path}}</code><br><span class="muted">{{.Format}}{{if .Resolve}}, refs expanded{{end}}{{if .PostCmd}}, then <code>{{.PostCmd}}</code>{{end}}</span></td>
 <td>{{if .PushedAt.IsZero}}<span class="muted">never</span>{{else}}{{.PushedAt.Format "2006-01-02 15:04"}}{{end}}</td>
 <td class="actions">
-<form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/push"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Push</button></form>
+<form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/preview"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button>Push</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/check"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="secondary">Check</button></form>
 <form method="post" action="/p/{{$.Project}}/{{$.Env}}/targets/{{.Name}}/delete"><input type="hidden" name="csrf" value="{{$.CSRF}}"><button class="danger">Delete</button></form>
 </td></tr>{{end}}</tbody></table>
@@ -123,6 +123,23 @@
 <input type="hidden" name="csrf" value="{{.CSRF}}">
 <label>Delete this environment and its keys <input name="confirm" placeholder="type {{.Env}} to confirm" autocomplete="off"></label>
 <button class="danger">Delete environment</button>
+</form>
+{{template "foot" .}}{{end}}
+
+{{define "preview"}}{{template "head" .}}
+<p class="crumbs"><a href="/">Projects</a> / <a href="/p/{{.Project}}">{{.Project}}</a> / <a href="/p/{{.Project}}/{{.Env}}">{{.Env}}</a> / {{.Target}}</p>
+<h1>Push {{.Target}}</h1>
+{{with .Preview}}{{if .Unparsed}}<p class="error">Could not parse the file on the target. Pushing replaces it.</p>
+{{else}}{{if .Missing}}<p class="muted">The file does not exist on the target yet.</p>{{end}}
+{{if or .Added .Changed .Removed}}<table><thead><tr><th>Key</th><th>Change</th></tr></thead><tbody>
+{{range .Added}}<tr><td><code>{{.}}</code></td><td>added</td></tr>{{end}}
+{{range .Changed}}<tr><td><code>{{.}}</code></td><td>changed</td></tr>{{end}}
+{{range .Removed}}<tr><td><code>{{.}}</code></td><td>removed</td></tr>{{end}}
+</tbody></table>
+{{else}}<p class="muted">No key changes.</p>{{end}}{{end}}{{end}}
+<form method="post" action="/p/{{.Project}}/{{.Env}}/targets/{{.Target}}/push" class="card">
+<input type="hidden" name="csrf" value="{{.CSRF}}">
+<button>Confirm push</button>
 </form>
 {{template "foot" .}}{{end}}
 
