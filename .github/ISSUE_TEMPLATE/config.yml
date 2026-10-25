@@ -1,5 +1,1 @@
 blank_issues_enabled: false
-contact_links:
-  - name: Report a security vulnerability
-    url: https://github.com/CarsonZuniga/tinyvault/security/advisories/new
-    about: Please do not open a public issue for security problems.
