@@ -5,7 +5,7 @@ features, please open an issue first so we can check they fit.
 
 ## Setup
 
-Requires Go 1.26 or later.
+Requires Go 1.27 or later.
 
 ```sh
 go build ./cmd/tinyvault
