@@ -59,6 +59,8 @@ docker run -d -p 8080:8080 -v tinyvault-data:/data \
 | `TINYVAULT_SECURE_COOKIES` | Turn on once it's behind HTTPS |
 | `TINYVAULT_IP_HEADER` | Set to `CF-Connecting-IP` (or similar) behind a proxy so login rate limiting sees real client IPs |
 | `TINYVAULT_DB` | Path to the SQLite file |
+| `TINYVAULT_AUDIT_RETENTION_DAYS` | Delete audit entries older than this many days (default: keep forever) |
+| `TINYVAULT_HISTORY_KEEP` | Keep at most this many versions per key, always including the latest (default: keep all) |
 
 The key, hash and TOTP secret can also be supplied as files via `TINYVAULT_MASTER_KEY_FILE`, `TINYVAULT_ADMIN_HASH_FILE` and `TINYVAULT_TOTP_SECRET_FILE`. If both forms are set, the `_FILE` version wins.
 
@@ -66,7 +68,7 @@ The key, hash and TOTP secret can also be supplied as files via `TINYVAULT_MASTE
 
 Secrets are grouped by project and environment, e.g. `media/prod`. You can paste in an existing `.env`, JSON object or Kubernetes Secret to get started, and export back out in any of those formats or as shell `export` lines. Values can reference each other with `${OTHER_KEY}`, and that gets expanded on export if you ask for it.
 
-Values stay hidden in the UI until you click Reveal. Every change keeps the old version around, so a bad edit or delete can be undone from the key's history page. Reveals, exports and pushes all show up in the audit log.
+Values stay hidden in the UI until you click Reveal. Every change keeps the old version around (up to `TINYVAULT_HISTORY_KEEP` versions, if set), so a bad edit or delete can be undone from the key's history page. Reveals, exports and pushes all show up in the audit log.
 
 ## Pushing
 

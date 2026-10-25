@@ -116,6 +116,8 @@ type config struct {
 	listen        string
 	ipHeader      string
 	secureCookies bool
+	auditDays     int
+	historyKeep   int
 }
 
 func envOrFile(name string) (string, error) {
@@ -131,6 +133,18 @@ func getenv(name, def string) string {
 		return v
 	}
 	return def
+}
+
+func positiveInt(name string) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 1 {
+		fatal("%s must be a positive integer", name)
+	}
+	return n
 }
 
 func loadMasterKey() []byte {
@@ -184,6 +198,8 @@ func loadConfig() config {
 		listen:        getenv("TINYVAULT_LISTEN", ":8080"),
 		ipHeader:      os.Getenv("TINYVAULT_IP_HEADER"),
 		secureCookies: secure,
+		auditDays:     positiveInt("TINYVAULT_AUDIT_RETENTION_DAYS"),
+		historyKeep:   positiveInt("TINYVAULT_HISTORY_KEEP"),
 	}
 }
 
@@ -247,10 +263,41 @@ func runServe() {
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 	}()
+	if cfg.auditDays > 0 || cfg.historyKeep > 0 {
+		go runPrune(ctx, st, cfg)
+	}
 
 	log.Printf("listening on %s (db: %s)", cfg.listen, cfg.dbPath)
 	if err := srv.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 		fatal("%v", err)
 	}
 	log.Print("shut down cleanly")
+}
+
+func runPrune(ctx context.Context, st *store.Store, cfg config) {
+	tick := time.NewTicker(24 * time.Hour)
+	defer tick.Stop()
+	for {
+		if cfg.auditDays > 0 {
+			n, err := st.PruneAudit(time.Now().AddDate(0, 0, -cfg.auditDays))
+			if err != nil {
+				log.Printf("pruning audit log: %v", err)
+			} else {
+				log.Printf("pruned %d audit entries older than %d days", n, cfg.auditDays)
+			}
+		}
+		if cfg.historyKeep > 0 {
+			n, err := st.PruneHistory(cfg.historyKeep)
+			if err != nil {
+				log.Printf("pruning history: %v", err)
+			} else {
+				log.Printf("pruned %d versions beyond the latest %d per key", n, cfg.historyKeep)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
