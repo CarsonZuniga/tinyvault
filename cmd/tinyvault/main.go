@@ -43,6 +43,8 @@ func main() {
 		runServe()
 	case "backup":
 		runBackup()
+	case "check":
+		os.Exit(runCheck(os.Args[2:]))
 	default:
 		usage()
 		os.Exit(1)
@@ -58,12 +60,16 @@ Commands:
   hash-password   read a password and print its Argon2id hash
   rotate-key      re-encrypt the database under a new master key and print it
   serve           start the web server
-  backup <file>   write a snapshot of the database to a new file`)
+  backup <file>   write a snapshot of the database to a new file
+  check [project [env]]
+                  check targets; exit 1 if any is not in sync, 2 on errors`)
 }
+
+var fatalCode = 1
 
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "tinyvault: "+format+"\n", args...)
-	os.Exit(1)
+	os.Exit(fatalCode)
 }
 
 func runHashPassword() {
