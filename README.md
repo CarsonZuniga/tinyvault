@@ -25,6 +25,8 @@ export TINYVAULT_DB=$PWD/tinyvault.db
 
 Then go to http://localhost:8080.
 
+To also require a code from an authenticator app at login, run `./tinyvault gentotp > totp.secret`, add the printed `otpauth://` link to the app, and set `TINYVAULT_TOTP_SECRET_FILE=$PWD/totp.secret`.
+
 The master key encrypts everything in the database. Lose it and the data is gone, so back it up somewhere other than next to the db.
 
 ### Docker
@@ -50,12 +52,13 @@ docker run -d -p 8080:8080 -v tinyvault-data:/data \
 | --- | --- |
 | `TINYVAULT_MASTER_KEY` | Base64 master key (generate with `tinyvault genkey`) |
 | `TINYVAULT_ADMIN_HASH` | Argon2id hash of the admin password (generate with `tinyvault hash-password`) |
+| `TINYVAULT_TOTP_SECRET` | Optional base32 TOTP secret; when set, login also asks for a code (generate with `tinyvault gentotp`) |
 | `TINYVAULT_LISTEN` | Listen address (default `:8080`) |
 | `TINYVAULT_SECURE_COOKIES` | Turn on once it's behind HTTPS |
 | `TINYVAULT_IP_HEADER` | Set to `CF-Connecting-IP` (or similar) behind a proxy so login rate limiting sees real client IPs |
 | `TINYVAULT_DB` | Path to the SQLite file |
 
-The key and hash can also be supplied as files via `TINYVAULT_MASTER_KEY_FILE` and `TINYVAULT_ADMIN_HASH_FILE`. If both forms are set, the direct variables win over the `_FILE` versions.
+The key, hash and TOTP secret can also be supplied as files via `TINYVAULT_MASTER_KEY_FILE`, `TINYVAULT_ADMIN_HASH_FILE` and `TINYVAULT_TOTP_SECRET_FILE`. If both forms are set, the `_FILE` version wins.
 
 ## Using it
 

@@ -17,7 +17,7 @@ const (
 	loginPath   = "/login"
 )
 
-var ErrInvalidCredentials = errors.New("invalid password")
+var ErrInvalidCredentials = errors.New("invalid password or code")
 
 type LockedError struct{ RetryAfter time.Duration }
 
@@ -29,6 +29,7 @@ type Config struct {
 	PasswordHash  string
 	SecureCookies bool
 	ClientIP      func(*http.Request) string
+	TOTPKey       []byte
 }
 
 type Auth struct {
@@ -36,6 +37,7 @@ type Auth struct {
 	sess   *sessions
 	perIP  *limiter
 	global *limiter
+	totp   *totp
 }
 
 type ctxKey struct{}
@@ -44,15 +46,21 @@ func New(cfg Config) *Auth {
 	if cfg.ClientIP == nil {
 		cfg.ClientIP = remoteIP
 	}
-	return &Auth{
+	a := &Auth{
 		cfg:    cfg,
 		sess:   newSessions(idleTimeout, maxAge),
 		perIP:  newLimiter(5, 15*time.Minute, 15*time.Minute),
 		global: newLimiter(50, 15*time.Minute, 5*time.Minute),
 	}
+	if cfg.TOTPKey != nil {
+		a.totp = &totp{key: cfg.TOTPKey, now: time.Now}
+	}
+	return a
 }
 
-func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password string) error {
+func (a *Auth) RequiresCode() bool { return a.totp != nil }
+
+func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password, code string) error {
 	ip := a.cfg.ClientIP(r)
 	for _, l := range []struct {
 		lim *limiter
@@ -65,6 +73,9 @@ func (a *Auth) Login(w http.ResponseWriter, r *http.Request, password string) er
 	ok, err := VerifyPassword(password, a.cfg.PasswordHash)
 	if err != nil {
 		return err
+	}
+	if ok && a.totp != nil {
+		ok = a.totp.verify(strings.TrimSpace(code))
 	}
 	if !ok {
 		a.perIP.fail(ip)

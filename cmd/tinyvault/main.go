@@ -31,6 +31,10 @@ func main() {
 	switch os.Args[1] {
 	case "genkey":
 		fmt.Println(crypto.GenerateKey())
+	case "gentotp":
+		secret := auth.GenerateTOTPSecret()
+		fmt.Println(secret)
+		fmt.Fprintln(os.Stderr, "Add to your authenticator app: "+auth.TOTPURI(secret))
 	case "hash-password":
 		runHashPassword()
 	case "serve":
@@ -46,6 +50,7 @@ func usage() {
 
 Commands:
   genkey          print a new base64 master key
+  gentotp         print a new TOTP secret for the admin login
   hash-password   read a password and print its Argon2id hash
   serve           start the web server`)
 }
@@ -90,6 +95,7 @@ func promptPassword(fd int, label string) string {
 type config struct {
 	masterKey     []byte
 	adminHash     string
+	totpKey       []byte
 	dbPath        string
 	listen        string
 	ipHeader      string
@@ -133,6 +139,16 @@ func loadConfig() config {
 	if _, err := auth.VerifyPassword("probe", hash); err != nil {
 		fatal("TINYVAULT_ADMIN_HASH is not a valid argon2id hash (generate one with: tinyvault hash-password)")
 	}
+	var totpKey []byte
+	totp, err := envOrFile("TINYVAULT_TOTP_SECRET")
+	if err != nil {
+		fatal("reading TOTP secret: %v", err)
+	}
+	if totp != "" {
+		if totpKey, err = auth.ParseTOTPSecret(totp); err != nil {
+			fatal("%v (generate one with: tinyvault gentotp)", err)
+		}
+	}
 	secure, err := strconv.ParseBool(getenv("TINYVAULT_SECURE_COOKIES", "false"))
 	if err != nil {
 		fatal("TINYVAULT_SECURE_COOKIES must be true or false")
@@ -140,6 +156,7 @@ func loadConfig() config {
 	return config{
 		masterKey:     key,
 		adminHash:     hash,
+		totpKey:       totpKey,
 		dbPath:        getenv("TINYVAULT_DB", "/data/tinyvault.db"),
 		listen:        getenv("TINYVAULT_LISTEN", ":8080"),
 		ipHeader:      os.Getenv("TINYVAULT_IP_HEADER"),
@@ -163,7 +180,7 @@ func runServe() {
 		log.Print("warning: TINYVAULT_SECURE_COOKIES is false; only use this over plain HTTP on a trusted network")
 	}
 
-	authCfg := auth.Config{PasswordHash: cfg.adminHash, SecureCookies: cfg.secureCookies}
+	authCfg := auth.Config{PasswordHash: cfg.adminHash, SecureCookies: cfg.secureCookies, TOTPKey: cfg.totpKey}
 	if cfg.ipHeader != "" {
 		authCfg.ClientIP = auth.HeaderIP(cfg.ipHeader)
 	}

@@ -194,14 +194,19 @@ func projectURL(project string) string { return "/p/" + url.PathEscape(project) 
 
 func envURL(project, env string) string { return projectURL(project) + "/" + url.PathEscape(env) }
 
+type loginPage struct {
+	page
+	Code bool
+}
+
 func (s *Server) loginForm(w http.ResponseWriter, r *http.Request) {
-	s.render(w, http.StatusOK, "login", page{Title: "Log in"})
+	s.render(w, http.StatusOK, "login", loginPage{page: page{Title: "Log in"}, Code: s.au.RequiresCode()})
 }
 
 func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
-	err := s.au.Login(w, r, r.PostFormValue("password"))
+	err := s.au.Login(w, r, r.PostFormValue("password"), r.PostFormValue("code"))
 	var locked *auth.LockedError
-	p := page{Title: "Log in"}
+	p := loginPage{page: page{Title: "Log in"}, Code: s.au.RequiresCode()}
 	switch {
 	case err == nil:
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -211,6 +216,9 @@ func (s *Server) loginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, http.StatusTooManyRequests, "login", p)
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		p.Err = "Wrong password."
+		if p.Code {
+			p.Err = "Wrong password or code."
+		}
 		s.render(w, http.StatusUnauthorized, "login", p)
 	default:
 		log.Printf("login: %v", err)
