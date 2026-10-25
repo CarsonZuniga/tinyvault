@@ -58,7 +58,7 @@ docker run -d -p 8080:8080 -v tinyvault-data:/data \
 | `TINYVAULT_IP_HEADER` | Set to `CF-Connecting-IP` (or similar) behind a proxy so login rate limiting sees real client IPs |
 | `TINYVAULT_DB` | Path to the SQLite file |
 
-The key, hash and TOTP secret can also be supplied as files via `TINYVAULT_MASTER_KEY_FILE`, `TINYVAULT_ADMIN_HASH_FILE` and `TINYVAULT_TOTP_SECRET_FILE`. If both forms are set, the direct variables win over the `_FILE` versions.
+The key, hash and TOTP secret can also be supplied as files via `TINYVAULT_MASTER_KEY_FILE`, `TINYVAULT_ADMIN_HASH_FILE` and `TINYVAULT_TOTP_SECRET_FILE`. If both forms are set, the `_FILE` version wins.
 
 ## Using it
 
