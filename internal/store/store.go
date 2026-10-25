@@ -104,15 +104,16 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) SSHKey() ed25519.PrivateKey { return s.sshKey }
 
+const sshKeyAAD = "meta/ssh_key"
+
 func (s *Store) loadSSHKey() (ed25519.PrivateKey, error) {
-	const aad = "meta/ssh_key"
 	enc, err := s.meta("ssh_key")
 	if errors.Is(err, ErrNotFound) {
 		seed := make([]byte, ed25519.SeedSize)
 		if _, err := rand.Read(seed); err != nil {
 			return nil, err
 		}
-		ct, err := s.box.Seal(seed, aad)
+		ct, err := s.box.Seal(seed, sshKeyAAD)
 		if err != nil {
 			return nil, err
 		}
@@ -125,7 +126,7 @@ func (s *Store) loadSSHKey() (ed25519.PrivateKey, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed, err := s.box.Open(ct, aad)
+	seed, err := s.box.Open(ct, sshKeyAAD)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt ssh key: %w", err)
 	}

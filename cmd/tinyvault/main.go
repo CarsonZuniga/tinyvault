@@ -37,6 +37,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "Add to your authenticator app: "+auth.TOTPURI(secret))
 	case "hash-password":
 		runHashPassword()
+	case "rotate-key":
+		runRotateKey()
 	case "serve":
 		runServe()
 	case "backup":
@@ -54,6 +56,7 @@ Commands:
   genkey          print a new base64 master key
   gentotp         print a new TOTP secret for the admin login
   hash-password   read a password and print its Argon2id hash
+  rotate-key      re-encrypt the database under a new master key and print it
   serve           start the web server
   backup <file>   write a snapshot of the database to a new file`)
 }
@@ -130,9 +133,7 @@ func getenv(name, def string) string {
 	return def
 }
 
-func dbPath() string { return getenv("TINYVAULT_DB", "/data/tinyvault.db") }
-
-func loadConfig() config {
+func loadMasterKey() []byte {
 	rawKey, err := envOrFile("TINYVAULT_MASTER_KEY")
 	if err != nil {
 		fatal("reading master key: %v", err)
@@ -144,6 +145,13 @@ func loadConfig() config {
 	if err != nil {
 		fatal("%v (generate one with: tinyvault genkey)", err)
 	}
+	return key
+}
+
+func dbPath() string { return getenv("TINYVAULT_DB", "/data/tinyvault.db") }
+
+func loadConfig() config {
+	key := loadMasterKey()
 	hash, err := envOrFile("TINYVAULT_ADMIN_HASH")
 	if err != nil {
 		fatal("reading admin hash: %v", err)
@@ -179,16 +187,32 @@ func loadConfig() config {
 	}
 }
 
-func runServe() {
-	cfg := loadConfig()
-
-	st, err := store.Open(cfg.dbPath, cfg.masterKey)
+func openStore(path string, key []byte) *store.Store {
+	st, err := store.Open(path, key)
 	if errors.Is(err, store.ErrWrongKey) {
-		fatal("master key does not match the database at %s", cfg.dbPath)
+		fatal("master key does not match the database at %s", path)
 	}
 	if err != nil {
 		fatal("opening database: %v", err)
 	}
+	return st
+}
+
+func runRotateKey() {
+	st := openStore(dbPath(), loadMasterKey())
+	defer st.Close()
+	newKey := crypto.GenerateKey()
+	key, _ := crypto.ParseKey(newKey)
+	if err := st.RotateKey(key, "admin"); err != nil {
+		fatal("rotating key: %v", err)
+	}
+	fmt.Println(newKey)
+}
+
+func runServe() {
+	cfg := loadConfig()
+
+	st := openStore(cfg.dbPath, cfg.masterKey)
 	defer st.Close()
 
 	if !cfg.secureCookies {

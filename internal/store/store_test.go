@@ -221,3 +221,32 @@ func TestValidationAndCascade(t *testing.T) {
 		t.Fatal("cascade delete failed")
 	}
 }
+
+func TestRotateKey(t *testing.T) {
+	s, p := newStore(t)
+	s.Set("media", "prod", "K", "v1", "admin")
+	s.Set("media", "prod", "K", "v2", "admin")
+	s.Delete("media", "prod", "K", "admin")
+	sshKey := s.SSHKey()
+	if err := s.RotateKey(testKey(2), "admin"); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if _, err := Open(p, testKey(1)); !errors.Is(err, ErrWrongKey) {
+		t.Fatalf("old key: %v", err)
+	}
+	s2, err := Open(p, testKey(2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if !s2.SSHKey().Equal(sshKey) {
+		t.Fatal("ssh key changed")
+	}
+	if err := s2.Rollback("media", "prod", "K", 1, "admin"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := s2.Get("media", "prod", "K", "admin"); v != "v1" {
+		t.Fatalf("got %q", v)
+	}
+}
